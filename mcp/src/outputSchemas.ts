@@ -385,6 +385,28 @@ export const RECOVER_CACHE_OUTPUT_SCHEMA = {
   required: ["source", "action", "message"],
 } as const;
 
+export const PUBLISH_TEMPLATE_OUTPUT_SCHEMA = {
+  type: "object",
+  properties: {
+    resourceType: { type: "string", enum: ["dataset", "code", "prompt", "model"] },
+    title: { type: "string" },
+    metadataPointer: { type: "string" },
+    tags: { type: "array", items: { type: "string" } },
+    price: { type: "string" },
+    description: { type: "string" },
+    nextSteps: { type: "array", items: { type: "string" } },
+  },
+  required: [
+    "resourceType",
+    "title",
+    "metadataPointer",
+    "tags",
+    "price",
+    "description",
+    "nextSteps",
+  ],
+} as const;
+
 /** Tools that must stay text-only (no schema, no structuredContent). */
 export const TEXT_ONLY_TOOLS = [
   "mindvault_check_bindings",

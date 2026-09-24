@@ -70,6 +70,7 @@ import {
   optionalInt,
   optionalString,
   requiredString,
+  requiredTagArray,
   TOOL_ARGUMENT_SPECS,
   TOOLS_WITHOUT_ARG_VALIDATION,
   UnknownToolError,
@@ -144,6 +145,11 @@ import {
   SPONSORED_CREATE_PATH,
 } from "./sponsoredDiagnostics.js";
 import { parseMetadataHash } from "./metadataHash.js";
+import {
+  applyPublishTemplate,
+  KNOWN_RESOURCE_TYPES,
+  type KnownResourceType,
+} from "./publishTemplate.js";
 import {
   applyCatalogSort,
   applyClientCatalogFilters,
@@ -2676,6 +2682,20 @@ async function dispatchToolOutcome(
         return formatVerifyInstall(verifyInstall(process.env));
       case "mindvault_recover_catalog_cache":
         return recoverCatalogCache();
+      case "mindvault_publish_template": {
+        const resourceType = requiredString(args, "resourceType") as KnownResourceType;
+        return JSON.stringify(
+          applyPublishTemplate({
+            resourceType,
+            title: optionalString(args, "title"),
+            price: optionalString(args, "price"),
+            metadataPointer: optionalString(args, "metadataPointer"),
+            tags: Array.isArray(args["tags"]) ? (args["tags"] as string[]) : undefined,
+          }),
+          null,
+          2,
+        );
+      }
       default:
         throw new Error(`Unknown tool: ${name}`);
     }

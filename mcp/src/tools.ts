@@ -26,6 +26,7 @@ import {
   PREVIEW_OUTPUT_SCHEMA,
   PUBLISH_BUY_OUTPUT_SCHEMA,
   PUBLISH_STATUS_OUTPUT_SCHEMA,
+  PUBLISH_TEMPLATE_OUTPUT_SCHEMA,
   PURCHASE_HISTORY_OUTPUT_SCHEMA,
   RECOVER_CACHE_OUTPUT_SCHEMA,
   REGISTER_ONCHAIN_OUTPUT_SCHEMA,
@@ -1079,6 +1080,55 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     outputSchema: PURCHASE_HISTORY_OUTPUT_SCHEMA as unknown as Record<string, unknown>,
     annotations: {
       title: "Purchase History",
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+    },
+  },
+  {
+    name: "mindvault_publish_template",
+    description:
+      "Return a pre-filled publish specification for a known resource type (dataset, code, prompt, model). Pre-fills the on-chain metadata pointer hint, canonical discovery tags, a suggested USDC price, and a description template. The agent can override any field, then pass the result directly to mindvault_publish. This tool is read-only and makes no API calls or payments.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        resourceType: {
+          type: "string",
+          enum: ["dataset", "code", "prompt", "model"],
+          description:
+            "Known resource type to generate defaults for. Each type has its own canonical tags, metadata pointer format, suggested price, and description template.",
+          examples: ["dataset", "code", "prompt", "model"],
+        },
+        title: {
+          type: "string",
+          description: "Optional title to include in the returned spec (1–256 characters).",
+          examples: ["My Training Dataset", "GPT-4 System Prompt Library"],
+        },
+        price: {
+          type: "string",
+          description:
+            "Optional USDC price override (decimal string). Overrides the suggested price for the chosen resource type.",
+          examples: ["1.00", "5.00", "10.00"],
+        },
+        metadataPointer: {
+          type: "string",
+          description:
+            "Optional metadata pointer override. When supplied, replaces the type-default format. Must start with ipfs://, ar://, http(s)://, sha256:, sha-256:, or 0x.",
+          examples: ["ipfs://QmXyz...", "sha256:abc123..."],
+        },
+        tags: {
+          type: "array",
+          description:
+            "Optional tag override (replaces, not merges, the type-default tags). 1–8 lowercase tags, each 1–32 characters.",
+          items: { type: "string" },
+          examples: [["dataset", "finance", "time-series"]],
+        },
+      },
+      required: ["resourceType"],
+    },
+    outputSchema: PUBLISH_TEMPLATE_OUTPUT_SCHEMA as unknown as Record<string, unknown>,
+    annotations: {
+      title: "Publish Template",
       readOnlyHint: true,
       destructiveHint: false,
       idempotentHint: true,

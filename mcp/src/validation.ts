@@ -335,6 +335,23 @@ export const TOOL_ARGUMENT_SPECS: Record<string, ToolArgumentSpec> = {
   },
   mindvault_verify_install: {},
   mindvault_recover_catalog_cache: {},
+  mindvault_publish_template: {
+    resourceType: {
+      kind: "enum",
+      required: true,
+      values: ["dataset", "code", "prompt", "model"],
+    },
+    title: { kind: "string", maxLength: 256 },
+    price: { ...USDC_AMOUNT },
+    metadataPointer: {
+      kind: "string",
+      maxLength: 512,
+      pattern: /^(ipfs:\/\/|ar:\/\/|https?:\/\/|sha256:|sha-256:|0x)/i,
+      patternHint:
+        "a valid metadata pointer starting with ipfs://, ar://, http(s)://, sha256:, sha-256:, or 0x (max 512 chars)",
+    },
+    tags: { kind: "tag_array" },
+  },
 };
 
 // ── Errors ────────────────────────────────────────────────────────────────────

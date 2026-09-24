@@ -1318,6 +1318,131 @@ exports[`tool schema snapshots > mindvault_publish_status > output schema 1`] = 
 }
 `;
 
+exports[`tool schema snapshots > mindvault_publish_template > annotations 1`] = `
+{
+  "destructiveHint": false,
+  "idempotentHint": true,
+  "readOnlyHint": true,
+  "title": "Publish Template",
+}
+`;
+
+exports[`tool schema snapshots > mindvault_publish_template > input schema 1`] = `
+{
+  "properties": {
+    "metadataPointer": {
+      "description": "Optional metadata pointer override. When supplied, replaces the type-default format. Must start with ipfs://, ar://, http(s)://, sha256:, sha-256:, or 0x.",
+      "examples": [
+        "ipfs://QmXyz...",
+        "sha256:abc123...",
+      ],
+      "type": "string",
+    },
+    "price": {
+      "description": "Optional USDC price override (decimal string). Overrides the suggested price for the chosen resource type.",
+      "examples": [
+        "1.00",
+        "5.00",
+        "10.00",
+      ],
+      "type": "string",
+    },
+    "resourceType": {
+      "description": "Known resource type to generate defaults for. Each type has its own canonical tags, metadata pointer format, suggested price, and description template.",
+      "enum": [
+        "dataset",
+        "code",
+        "prompt",
+        "model",
+      ],
+      "examples": [
+        "dataset",
+        "code",
+        "prompt",
+        "model",
+      ],
+      "type": "string",
+    },
+    "tags": {
+      "description": "Optional tag override (replaces, not merges, the type-default tags). 1–8 lowercase tags, each 1–32 characters.",
+      "examples": [
+        [
+          "dataset",
+          "finance",
+          "time-series",
+        ],
+      ],
+      "items": {
+        "type": "string",
+      },
+      "type": "array",
+    },
+    "title": {
+      "description": "Optional title to include in the returned spec (1–256 characters).",
+      "examples": [
+        "My Training Dataset",
+        "GPT-4 System Prompt Library",
+      ],
+      "type": "string",
+    },
+  },
+  "required": [
+    "resourceType",
+  ],
+  "type": "object",
+}
+`;
+
+exports[`tool schema snapshots > mindvault_publish_template > output schema 1`] = `
+{
+  "properties": {
+    "description": {
+      "type": "string",
+    },
+    "metadataPointer": {
+      "type": "string",
+    },
+    "nextSteps": {
+      "items": {
+        "type": "string",
+      },
+      "type": "array",
+    },
+    "price": {
+      "type": "string",
+    },
+    "resourceType": {
+      "enum": [
+        "dataset",
+        "code",
+        "prompt",
+        "model",
+      ],
+      "type": "string",
+    },
+    "tags": {
+      "items": {
+        "type": "string",
+      },
+      "type": "array",
+    },
+    "title": {
+      "type": "string",
+    },
+  },
+  "required": [
+    "resourceType",
+    "title",
+    "metadataPointer",
+    "tags",
+    "price",
+    "description",
+    "nextSteps",
+  ],
+  "type": "object",
+}
+`;
+
 exports[`tool schema snapshots > mindvault_purchase_history > annotations 1`] = `
 {
   "destructiveHint": false,
@@ -2986,6 +3111,7 @@ exports[`tool schema snapshots > the covered tool names are pinned 1`] = `
   "mindvault_preview",
   "mindvault_publish",
   "mindvault_publish_status",
+  "mindvault_publish_template",
   "mindvault_purchase_history",
   "mindvault_recover_catalog_cache",
   "mindvault_register",
