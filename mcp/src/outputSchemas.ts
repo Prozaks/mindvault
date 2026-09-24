@@ -88,6 +88,96 @@ export const USE_PROFILE_OUTPUT_SCHEMA = {
   required: ["profile", "address", "publisherRegistered"],
 } as const;
 
+const BALANCE_ROW_SCHEMA = {
+  type: "object",
+  properties: {
+    profile: { type: ["string", "null"] },
+    address: { type: "string" },
+    active: { type: ["boolean", "null"] },
+    publisherRegistered: { type: ["boolean", "null"] },
+    xlmBalance: { type: ["string", "null"] },
+    xlmReserve: { type: ["string", "null"] },
+    xlmAvailable: { type: ["string", "null"] },
+    usdcBalance: { type: ["string", "null"] },
+    usdcStatus: { type: ["string", "null"] },
+    note: { type: ["string", "null"] },
+  },
+  required: [
+    "profile",
+    "address",
+    "active",
+    "publisherRegistered",
+    "xlmBalance",
+    "xlmReserve",
+    "xlmAvailable",
+    "usdcBalance",
+    "usdcStatus",
+    "note",
+  ],
+} as const;
+
+export const WALLET_BALANCES_OUTPUT_SCHEMA = {
+  type: "object",
+  properties: {
+    source: { type: "string" },
+    requestedAt: { type: "string" },
+    platform: {
+      type: ["object", "null"],
+      properties: {
+        configured: { type: "boolean" },
+        ...BALANCE_ROW_SCHEMA.properties,
+      },
+      required: ["configured", ...BALANCE_ROW_SCHEMA.required],
+    },
+    agents: { type: "array", items: BALANCE_ROW_SCHEMA },
+    count: { type: "integer" },
+    statistics: {
+      type: "object",
+      properties: { totalUsdc: { type: "string" }, totalXlm: { type: "string" } },
+      required: ["totalUsdc", "totalXlm"],
+    },
+    message: { type: "string" },
+  },
+  required: ["source", "requestedAt", "platform", "agents", "count", "statistics", "message"],
+} as const;
+
+export const SERVER_ENDPOINTS_OUTPUT_SCHEMA = {
+  type: "object",
+  properties: {
+    source: { type: "string" },
+    baseUrl: { type: "string" },
+    openapi: { type: ["string", "null"] },
+    server: { type: ["object", "null"] },
+    endpointCount: { type: "integer" },
+    operations: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          method: { type: "string" },
+          path: { type: "string" },
+          operationId: { type: ["string", "null"] },
+          tags: { type: "array", items: { type: "string" } },
+          summary: { type: ["string", "null"] },
+        },
+        required: ["method", "path", "operationId", "tags", "summary"],
+      },
+    },
+    paths: { type: "array", items: { type: "string" } },
+    message: { type: "string" },
+  },
+  required: [
+    "source",
+    "baseUrl",
+    "openapi",
+    "server",
+    "endpointCount",
+    "operations",
+    "paths",
+    "message",
+  ],
+} as const;
+
 export const LIST_PROFILES_OUTPUT_SCHEMA = {
   type: "object",
   properties: {
@@ -148,9 +238,56 @@ const MUTATION_SUMMARY_SCHEMA = {
   required: ["before", "after", "changedFields", "txHash"],
 } as const;
 
+/**
+ * The settlement-confirmation block `mindvault_buy` adds to its summary when
+ * wait is set (#888): whether the payment transaction was polled, its last
+ * status, and whether it reached a terminal status before the deadline.
+ */
+export const SETTLEMENT_SCHEMA = {
+  type: "object",
+  properties: {
+    polled: { type: "boolean" },
+    txHash: { type: ["string", "null"] },
+    status: { type: ["string", "null"] },
+    settled: { type: "boolean" },
+    success: { type: "boolean" },
+    timedOut: { type: "boolean" },
+    attempts: { type: "integer" },
+    skipped: { type: "boolean" },
+    message: { type: "string" },
+  },
+  required: [
+    "polled",
+    "txHash",
+    "status",
+    "settled",
+    "success",
+    "timedOut",
+    "attempts",
+    "skipped",
+    "message",
+  ],
+} as const;
+
+const BUY_SUMMARY_SCHEMA = {
+  type: "object",
+  properties: {
+    ...MUTATION_SUMMARY_SCHEMA.properties,
+    settlement: SETTLEMENT_SCHEMA,
+  },
+  required: [...MUTATION_SUMMARY_SCHEMA.required, "settlement"],
+  description:
+    "mindvault_buy result: the purchase diff plus a settlement-confirmation block describing how far the payment transaction got before returning.",
+} as const;
+
 export const PUBLISH_BUY_OUTPUT_SCHEMA = {
   type: "object",
   oneOf: [MUTATION_SUMMARY_SCHEMA, DRY_RUN_SCHEMA, TEXT_RESULT_SCHEMA],
+} as const;
+
+export const BUY_OUTPUT_SCHEMA = {
+  type: "object",
+  oneOf: [BUY_SUMMARY_SCHEMA, DRY_RUN_SCHEMA, TEXT_RESULT_SCHEMA],
 } as const;
 
 export const REGISTER_ONCHAIN_OUTPUT_SCHEMA = {
@@ -320,16 +457,27 @@ export const AGENT_STATUS_OUTPUT_SCHEMA = {
 
 export const METRICS_OUTPUT_SCHEMA = {
   type: "object",
-  properties: {
-    enabled: { type: "boolean" },
-    since: { type: ["string", "null"] },
-    toolDurationBudgetMs: { type: ["integer", "null"] },
-    totals: { type: "object" },
-    payments: { type: "object" },
-    tools: { type: "object" },
-    message: { type: "string" },
-  },
-  required: ["enabled"],
+  oneOf: [
+    {
+      type: "object",
+      properties: {
+        enabled: { type: "boolean" },
+        since: { type: ["string", "null"] },
+        toolDurationBudgetMs: { type: ["integer", "null"] },
+        totals: { type: "object" },
+        payments: { type: "object" },
+        tools: { type: "object" },
+        message: { type: "string" },
+      },
+      required: ["enabled"],
+    },
+    {
+      type: "object",
+      description:
+        "The same snapshot rendered as an OTLP/JSON ExportMetricsServiceRequest body when format=otlp.",
+      required: ["resourceMetrics"],
+    },
+  ],
 } as const;
 
 const TX_FOUND_SCHEMA = {

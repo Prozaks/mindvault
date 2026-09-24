@@ -63,15 +63,18 @@ Available tools:
 | ------------------------------ | -------------------------------------------------------------------------- | --------------------------------------------------------------- |
 | `mindvault_setup_wallet`       | Create a Stellar wallet using the sponsored account protocol               | `"Create a wallet for me"`                                      |
 | `mindvault_wallet_info`        | Check wallet address and USDC balance                                      | `"What's my wallet balance?"`                                   |
+| `mindvault_wallet_balances`    | List balances for every configured agent wallet plus the platform wallet   | `"Show all wallet balances"`                                    |
 | `mindvault_browse`             | List catalog resources (same filters and sort options as search)           | `"List the cheapest resources first"`                           |
 | `mindvault_search`             | Search catalog by keyword, price, type, status, owner, tags, listed        | `"Find verified links under 1 USDC"`                            |
 | `mindvault_preview`            | Get details and price for a resource                                       | `"Preview resource swcn98besxpp6t1u8e77fqz3"`                   |
 | `mindvault_register`           | Register as a publisher using the agent's wallet                           | `"Register me as Alice, alice@example.com"`                     |
 | `mindvault_publish`            | Publish a resource and pay for verification via x402                       | `"Publish 'My Dataset' for 5 USDC at https://example.com/data"` |
 | `mindvault_publish_status`     | Poll verification and on-chain sync status after publish                   | `"Check publish status for swcn98besxpp6t1u8e77fqz3"`           |
-| `mindvault_buy`                | Pay USDC and access a resource via x402                                    | `"Buy resource swcn98besxpp6t1u8e77fqz3"`                       |
+| `mindvault_buy`                | Pay USDC and access a resource via x402 (optional wait for settlement)     | `"Buy resource swcn98besxpp6t1u8e77fqz3"`                       |
 | `mindvault_purchase_history`   | List locally persisted purchase receipts (filter by resource/network)      | `"Show my purchase history for stellar:testnet"`                |
 | `mindvault_export_receipts`    | Export purchase receipts as a schema-versioned JSON or CSV document        | `"Export August's receipts as CSV"`                             |
+| `mindvault_metrics`            | Read opt-in tool metrics, optionally reset, exported as JSON or OTLP       | `"Show metrics"`                                                |
+| `mindvault_server_endpoints`   | Introspect this deployment's HTTP API from its published OpenAPI spec      | `"What endpoints does the server expose?"`                      |
 | `mindvault_register_onchain`   | Retry on-chain registration for a published, verified resource             | `"Register resource swcn98besxpp6t1u8e77fqz3 on-chain"`         |
 | `mindvault_update_metadata`    | Update on-chain metadata pointer for a resource                            | `"Update metadata for swcn98besxpp6t1u8e77fqz3 to ipfs://..."`  |
 | `mindvault_set_price`          | Update on-chain USDC price for a resource                                  | `"Set price for swcn98besxpp6t1u8e77fqz3 to 10 USDC"`           |
@@ -101,20 +104,22 @@ Copy-ready configs for Claude Code, Claude Desktop, Codex, Cursor, VS Code, and 
 
 All env vars are optional — the defaults point to the hosted testnet backend:
 
-| Variable                     | Default                                                | Description                                        |
-| ---------------------------- | ------------------------------------------------------ | -------------------------------------------------- |
-| `MINDVAULT_URL`              | `https://mindvault-hyr3.onrender.com`                  | MindVault API base URL                             |
-| `SPONSORED_ACCOUNT_URL`      | `https://stellar-sponsored-agent-account.onrender.com` | Sponsored wallet creation service                  |
-| `VAULT_REGISTRY_CONTRACT_ID` | testnet contract ID                                    | On-chain vault-registry contract                   |
-| `HORIZON_URL`                | `https://horizon-testnet.stellar.org`                  | Stellar Horizon endpoint (for USDC balance checks) |
-| `SOROBAN_RPC_URL`            | `https://soroban-testnet.stellar.org`                  | Soroban RPC endpoint (for tx status and payments)  |
-| `MINDVAULT_METRICS`          | _(unset)_                                              | Opt-in tool-level metrics; set to `1` to enable    |
+| Variable                           | Default                                                | Description                                                               |
+| ---------------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------- |
+| `MINDVAULT_URL`                    | `https://mindvault-hyr3.onrender.com`                  | MindVault API base URL                                                    |
+| `SPONSORED_ACCOUNT_URL`            | `https://stellar-sponsored-agent-account.onrender.com` | Sponsored wallet creation service                                         |
+| `VAULT_REGISTRY_CONTRACT_ID`       | testnet contract ID                                    | On-chain vault-registry contract                                          |
+| `HORIZON_URL`                      | `https://horizon-testnet.stellar.org`                  | Stellar Horizon endpoint (for USDC balance checks)                        |
+| `SOROBAN_RPC_URL`                  | `https://soroban-testnet.stellar.org`                  | Soroban RPC endpoint (for tx status and payments)                         |
+| `MINDVAULT_METRICS`                | _(unset)_                                              | Opt-in tool-level metrics; set to `1` to enable                           |
+| `MINDVAULT_METRICS_EXPORT_CONSOLE` | _(unset)_                                              | Mirror metrics to stderr as OTLP/JSON on every call; set to `1` to enable |
+| `PLATFORM_WALLET_ADDRESS`          | _(unset)_                                              | Platform wallet address aggregated by `mindvault_wallet_balances`         |
 
 Every tool validates its arguments against an explicit schema before doing any work: unknown or malformed arguments are rejected with a deterministic error instead of reaching the API as a failed request. See **[docs/mcp-tool-arguments.md](docs/mcp-tool-arguments.md)** for the per-tool contract and error shape.
 
 An agent can set up a wallet, register as a publisher, publish a resource (paying for verification), and then another agent can discover and buy that resource. The full agent-to-agent economy runs through x402.
 
-Operators who want lightweight visibility into tool usage can enable opt-in metrics (`MINDVAULT_METRICS=1`) and read them with the `mindvault_metrics` tool. See **[docs/mcp-metrics.md](docs/mcp-metrics.md)**.
+Operators who want lightweight visibility into tool usage can enable opt-in metrics (`MINDVAULT_METRICS=1`) and read them with the `mindvault_metrics` tool (JSON or OTLP format; `MINDVAULT_METRICS_EXPORT_CONSOLE=1` mirrors each call's metrics to stderr). See **[docs/mcp-metrics.md](docs/mcp-metrics.md)**.
 
 For a copy-pasteable, end-to-end agent session — wallet setup → register → publish → browse → buy — see **[docs/mcp-quickstart.md](docs/mcp-quickstart.md)**. For a step-by-step demo with example outputs for every tool call, see **[docs/mcp-agent-to-agent-demo.md](docs/mcp-agent-to-agent-demo.md)**.
 

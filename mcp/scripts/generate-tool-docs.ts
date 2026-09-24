@@ -32,10 +32,17 @@ const outPath = join(docsDir, "mcp-tool-reference.md");
 
 /**
  * Classify a tool into a functional group so the reference page is scannable
- * rather than a single flat list of 34 tools.
+ * rather than a single flat list of tools.
  */
 function groupOf(name: string): string {
-  if (["mindvault_setup_wallet", "mindvault_wallet_info", "mindvault_import_wallet"].includes(name))
+  if (
+    [
+      "mindvault_setup_wallet",
+      "mindvault_wallet_info",
+      "mindvault_import_wallet",
+      "mindvault_wallet_balances",
+    ].includes(name)
+  )
     return "Wallet";
   if (["mindvault_use_profile", "mindvault_list_profiles"].includes(name)) return "Profiles";
   if (["mindvault_browse", "mindvault_search", "mindvault_preview"].includes(name))
@@ -69,6 +76,7 @@ function groupOf(name: string): string {
       "mindvault_check_consistency",
       "mindvault_check_bindings",
       "mindvault_tx_status",
+      "mindvault_server_endpoints",
     ].includes(name)
   )
     return "Registry & Diagnostics";

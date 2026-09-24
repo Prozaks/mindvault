@@ -2,12 +2,13 @@
 
 This file is a generated, human-readable summary of the MCP tool surface (ListTools). It is scoped to the `mcp/` package and intended as a quick reference for integrators and reviewers.
 
-Generated: 2026-08-29
+Generated: 2026-09-24
 
 ## Tools
 
 - `mindvault_setup_wallet`: Create a Stellar wallet using the sponsored account protocol. Optionally pass a profile name to create the wallet under a named profile and make it active.
 - `mindvault_wallet_info`: Check the active profile, wallet address, USDC balance, and publisher registration status.
+- `mindvault_wallet_balances`: List balances for every configured agent wallet plus the platform wallet (from PLATFORM_WALLET_ADDRESS) over Horizon, with totals.
 - `mindvault_use_profile`: Switch the active wallet profile, creating it if it does not exist.
 - `mindvault_list_profiles`: List all named wallet profiles and their metadata.
 - `mindvault_browse`: List resources in the MindVault catalog with optional filters (keyword, price range, verification status, type, owner, sort, pagination, tags, listed state).
@@ -16,7 +17,7 @@ Generated: 2026-08-29
 - `mindvault_register`: Register as a publisher using the agent wallet (persists API key to state file).
 - `mindvault_publish`: Publish a link resource to the catalog; performs AI verification and may register on-chain if verified.
 - `mindvault_publish_status`: (not described here) Check publish verification/on-chain registration status.
-- `mindvault_buy`: Pay USDC via x402 and access a resource (supports dry-run).
+- `mindvault_buy`: Pay USDC via x402 and access a resource (supports dry-run and optional settlement confirmation via wait/timeoutMs/intervalMs).
 - `mindvault_export_receipts`: Export receipts for purchases as JSON or CSV with filtering and summary.
 - `mindvault_register_onchain`: Register an already-published, verified resource on the vault registry contract (retry on-chain registration).
 - `mindvault_agent_status`: Report the verification agent's earnings and activity.
@@ -30,7 +31,7 @@ Generated: 2026-08-29
 - `mindvault_reset`: Clear credentials from memory and disk (per-profile or all).
 - `mindvault_backup_state`: Export an encrypted backup of the state file.
 - `mindvault_restore_state`: Restore state from an encrypted backup.
-- `mindvault_metrics`: Return opt-in tool-level metrics; optionally reset counters.
+- `mindvault_metrics`: Return opt-in tool-level metrics as JSON or OTLP; optionally reset counters.
 - `mindvault_set_tags`: Replace discovery tags on an on-chain resource (owner-only).
 - `mindvault_update_metadata`: Update the on-chain metadata pointer for a registered resource (owner-only).
 - `mindvault_set_price`: Update on-chain price for a registered resource (owner-only).
@@ -42,6 +43,7 @@ Generated: 2026-08-29
 - `mindvault_rotate_publisher_key`: Rotate the publisher API key for a profile.
 - `mindvault_verify_install`: Verify local installation and configuration (Node.js version, env, contract IDs).
 - `mindvault_recover_catalog_cache`: Request a catalog stale-cache recovery; returns guidance for operators.
+- `mindvault_server_endpoints`: Introspect this deployment's HTTP API from its published OpenAPI spec (MINDVAULT_URL/openapi.json).
 
 ## Notes
 

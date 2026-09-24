@@ -31,6 +31,7 @@ import { parseMetadataHash, MetadataHashError, METADATA_HASH_FORMAT_HINT } from 
 import { CATALOG_MAX_LIMIT, CATALOG_SORT_VALUES } from "./catalogFilters.js";
 import { REGISTRY_LIST_MAX_LIMIT } from "./registryPagination.js";
 import { RECEIPT_EXPORT_MAX_LIMIT } from "./receipts.js";
+import { MAX_SETTLEMENT_TIMEOUT_MS, MIN_SETTLEMENT_INTERVAL_MS } from "./settlement.js";
 import { TOOL_DEFINITIONS } from "./tools.js";
 
 // ── Spec model ────────────────────────────────────────────────────────────────
@@ -245,6 +246,13 @@ export const TOOL_ARGUMENT_SPECS: Record<string, ToolArgumentSpec> = {
     maxAutoPayUsdc: { ...USDC_AMOUNT, required: false },
     confirmMainnet: CONFIRM_MAINNET,
     confirmPaid: CONFIRM_PAID,
+    wait: { kind: "flag" },
+    timeoutMs: {
+      kind: "integer",
+      min: 0,
+      max: MAX_SETTLEMENT_TIMEOUT_MS,
+    },
+    intervalMs: { kind: "integer", min: MIN_SETTLEMENT_INTERVAL_MS },
   },
   mindvault_export_receipts: {
     format: { kind: "enum", values: ["json", "csv"] },
@@ -286,7 +294,10 @@ export const TOOL_ARGUMENT_SPECS: Record<string, ToolArgumentSpec> = {
     blob: { kind: "string", required: true, maxLength: 1_048_576 },
     passphrase: PASSPHRASE,
   },
-  mindvault_metrics: { reset: { kind: "flag" } },
+  mindvault_metrics: {
+    reset: { kind: "flag" },
+    format: { kind: "enum", values: ["json", "otlp"] },
+  },
   mindvault_set_tags: {
     resourceId: RESOURCE_ID,
     tags: { kind: "tag_array", required: true },
@@ -335,6 +346,8 @@ export const TOOL_ARGUMENT_SPECS: Record<string, ToolArgumentSpec> = {
   },
   mindvault_verify_install: {},
   mindvault_recover_catalog_cache: {},
+  mindvault_wallet_balances: {},
+  mindvault_server_endpoints: {},
 };
 
 // ── Errors ────────────────────────────────────────────────────────────────────

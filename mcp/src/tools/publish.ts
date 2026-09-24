@@ -31,6 +31,18 @@ import { dryRunPublish, dryRunBuy } from "../dryRun.js";
 import { safeErrorMessage } from "../redaction.js";
 import { recordPurchase } from "../purchaseHistory.js";
 import { mockSetListed, mockSetPrice, mockTransferOwnership, mockUpdateMetadata } from "../mock.js";
+import {
+  buildSettlementSnapshot,
+  estimateSettlementSteps,
+  normalizeSettlementIntervalMs,
+  normalizeSettlementTimeoutMs,
+  normalizeSettlementWaitFlag,
+  pollSettlement,
+  skippedSettlementMessage,
+  type SettlementSnapshot,
+  type TransactionLookup,
+} from "../settlement.js";
+import { sorobanRpcFetch } from "../runtime.js";
 
 export function usdcToStroops(usdc: string): bigint {
   const parts = usdc.split(".");
@@ -212,6 +224,10 @@ export async function buy(
   dryRun?: boolean,
   estimatedPrice?: string | null,
   onProgress?: (progress: number, total?: number, message?: string) => Promise<void>,
+  maxAutoPayUsdc?: string,
+  wait?: unknown,
+  timeoutMs?: unknown,
+  intervalMs?: unknown,
 ): Promise<string> {
   if (dryRun) {
     return JSON.stringify(
@@ -289,6 +305,45 @@ export async function buy(
     console.error("MindVault MCP: failed to persist purchase receipt:", safeErrorMessage(err));
   }
 
+  // Settlement confirmation — mirrors index.ts so this legacy copy of the buy
+  // flow does not drift from the shipped tool (#888).
+  const waitForSettlement = normalizeSettlementWaitFlag(wait);
+  const settleTimeoutMs = normalizeSettlementTimeoutMs(timeoutMs);
+  const settleIntervalMs = normalizeSettlementIntervalMs(intervalMs);
+  let settlement: SettlementSnapshot = buildSettlementSnapshot({
+    txHash,
+    wait: waitForSettlement,
+    skipped: waitForSettlement && !txHash,
+    result: null,
+  });
+  let settleProgressEmitted = 0;
+  let settleProgressTotal = 0;
+
+  if (waitForSettlement && txHash) {
+    const settleSteps = estimateSettlementSteps(true, settleTimeoutMs, settleIntervalMs);
+    settleProgressTotal = settleSteps;
+    await onProgress?.(4, 4 + settleSteps, "Waiting for payment settlement");
+    const result = await pollSettlement({
+      txHash,
+      wait: true,
+      timeoutMs: settleTimeoutMs,
+      intervalMs: settleIntervalMs,
+      fetchTransaction: fetchTransactionLookup,
+      onProgress: async (p, total, message) => {
+        settleProgressEmitted = p;
+        settleProgressTotal = total ?? settleSteps;
+        await onProgress?.(4 + p, 4 + (total ?? settleSteps), message);
+      },
+      sleep: sleepMs,
+    });
+    settlement = buildSettlementSnapshot({
+      txHash,
+      wait: true,
+      skipped: false,
+      result,
+    });
+  }
+
   const summary = {
     before: beforeState,
     after: {
@@ -297,11 +352,58 @@ export async function buy(
     },
     changedFields: beforeState ? ["purchased"] : ["id", "title", "price", "accessUrl", "purchased"],
     txHash,
+    settlement,
   };
 
-  await onProgress?.(4, 4, "Done");
+  await onProgress?.(4 + settleProgressEmitted, 4 + settleProgressTotal, "Done");
 
   return JSON.stringify(summary, null, 2);
+}
+
+async function sleepMs(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchTransactionLookup(txHash: string): Promise<TransactionLookup> {
+  const res = await sorobanRpcFetch(
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "getTransaction",
+        params: { hash: txHash },
+      }),
+    },
+    "POST soroban getTransaction",
+  );
+  if (!res.ok)
+    throwHttpError({
+      operation: `Soroban RPC error: ${res.status}`,
+      source: "soroban",
+      status: res.status,
+      data: await res.text().catch(() => null),
+    });
+  const data: any = await res.json();
+  if (data.error)
+    throw mcpError(
+      mapRegistryError({
+        operation: "RPC error",
+        message: JSON.stringify(data.error),
+        source: "soroban",
+      }),
+    );
+  const tx = data.result;
+  const status = typeof tx?.status === "string" ? tx.status : "UNKNOWN";
+  return {
+    hash: txHash,
+    found: status !== "NOT_FOUND",
+    status,
+    ledger: typeof tx?.ledger === "number" ? tx.ledger : null,
+    ledgerCloseTime:
+      typeof tx?.createdAt === "number" ? new Date(tx.createdAt * 1000).toISOString() : null,
+  };
 }
 
 export async function registerOnchain(

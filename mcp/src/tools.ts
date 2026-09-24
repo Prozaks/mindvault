@@ -27,13 +27,16 @@ import {
   PUBLISH_BUY_OUTPUT_SCHEMA,
   PUBLISH_STATUS_OUTPUT_SCHEMA,
   PURCHASE_HISTORY_OUTPUT_SCHEMA,
+  BUY_OUTPUT_SCHEMA,
   RECOVER_CACHE_OUTPUT_SCHEMA,
   REGISTER_ONCHAIN_OUTPUT_SCHEMA,
   REGISTRY_INFO_OUTPUT_SCHEMA,
   REGISTRY_LIST_OUTPUT_SCHEMA,
   REGISTRY_LOOKUP_OUTPUT_SCHEMA,
+  SERVER_ENDPOINTS_OUTPUT_SCHEMA,
   TX_STATUS_OUTPUT_SCHEMA,
   USE_PROFILE_OUTPUT_SCHEMA,
+  WALLET_BALANCES_OUTPUT_SCHEMA,
   WALLET_INFO_OUTPUT_SCHEMA,
   WALLET_SETUP_OUTPUT_SCHEMA,
 } from "./outputSchemas.js";
@@ -323,7 +326,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     name: "mindvault_buy",
     description:
-      "Pay USDC via x402 and access a resource. Payments above MINDVAULT_MAX_AUTO_PAY_USDC (10 USDC by default) require maxAutoPayUsdc set to at least the resource price. On mainnet, pass confirmMainnet: true (or set MINDVAULT_ALLOW_MAINNET=1). Pass dryRun: true to validate the resource and show intended payment flow without submitting payment.",
+      "Pay USDC via x402 and access a resource. Payments above MINDVAULT_MAX_AUTO_PAY_USDC (10 USDC by default) require maxAutoPayUsdc set to at least the resource price. On mainnet, pass confirmMainnet: true (or set MINDVAULT_ALLOW_MAINNET=1). Pass dryRun: true to validate the resource and show intended payment flow without submitting payment. Pass wait: true to poll the payment transaction until it settles on-chain before returning.",
     inputSchema: {
       type: "object",
       properties: {
@@ -350,10 +353,32 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
             "Required on mainnet (or set MINDVAULT_ALLOW_MAINNET=1). Explicitly confirm this mutation/payment on the public Stellar network.",
         },
         confirmPaid: { ...CONFIRM_PAID_PROPERTY },
+        wait: {
+          type: "boolean",
+          description:
+            "Optional flag. When true, wait and poll the payment transaction on Soroban until it settles (SUCCESS or FAILED) or the timeout elapses, returning a settlement confirmation block. Off by default, in which case the buy returns as soon as the payment response arrives.",
+        },
+        timeoutMs: {
+          type: "integer",
+          minimum: 0,
+          maximum: 300000,
+          description:
+            "Optional deadline in milliseconds for settlement confirmation when wait is true. Default 60000, inclusive maximum 300000.",
+          default: 60000,
+          examples: [30000, 60000],
+        },
+        intervalMs: {
+          type: "integer",
+          minimum: 200,
+          description:
+            "Optional interval in milliseconds between settlement status polls when wait is true. Default 2000, minimum 200.",
+          default: 2000,
+          examples: [500, 2000],
+        },
       },
       required: ["resourceId"],
     },
-    outputSchema: PUBLISH_BUY_OUTPUT_SCHEMA as unknown as Record<string, unknown>,
+    outputSchema: BUY_OUTPUT_SCHEMA as unknown as Record<string, unknown>,
     annotations: {
       title: "Buy Resource",
       readOnlyHint: false,
@@ -694,7 +719,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     name: "mindvault_metrics",
     description:
-      "Return opt-in tool-level metrics: per-tool call/error counts and durations, plus payment attempt/failure totals. Enable by setting MINDVAULT_METRICS=1 on the server. Output contains only tool names, counts, and durations — never arguments, wallets, or API keys. Pass reset=true to clear counters after reading.",
+      "Return opt-in tool-level metrics: per-tool call/error counts and durations, plus payment attempt/failure totals. Enable by setting MINDVAULT_METRICS=1 on the server. Output contains only tool names, counts, and durations — never arguments, wallets, or API keys. Pass reset=true to clear counters after reading. format=otlp renders the same snapshot as an OTLP/JSON ExportMetricsServiceRequest body for direct submission to an OpenTelemetry collector.",
     inputSchema: {
       type: "object",
       properties: {
@@ -703,6 +728,14 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
           description:
             "Clear all counters after returning the current snapshot (default: false leaves counters intact). Example: true resets metrics after reading.",
           examples: [true, false],
+        },
+        format: {
+          type: "string",
+          enum: ["json", "otlp"],
+          description:
+            "Metrics export format. json (default) returns the snapshot object; otlp returns the same data as an OTLP/JSON ExportMetricsServiceRequest payload (a resourceMetrics envelope ready for an OpenTelemetry collector).",
+          default: "json",
+          examples: ["json", "otlp"],
         },
       },
       required: [],
@@ -1079,6 +1112,40 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     outputSchema: PURCHASE_HISTORY_OUTPUT_SCHEMA as unknown as Record<string, unknown>,
     annotations: {
       title: "Purchase History",
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+    },
+  },
+  {
+    name: "mindvault_wallet_balances",
+    description:
+      "Balances for every configured agent wallet (each profile with a wallet) plus the platform wallet, from PLATFORM_WALLET_ADDRESS when set. Read-only. Reports XLM total/available/reserve and USDC balance/status per wallet over Horizon, plus totals across unique wallets. A wallet that fails to load is reported with a note rather than failing the whole call.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+      required: [],
+    },
+    outputSchema: WALLET_BALANCES_OUTPUT_SCHEMA as unknown as Record<string, unknown>,
+    annotations: {
+      title: "Wallet Balances",
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+    },
+  },
+  {
+    name: "mindvault_server_endpoints",
+    description:
+      "Introspect this MindVault deployment's HTTP API from its published OpenAPI spec (MINDVAULT_URL/openapi.json). Read-only. Returns the discovered endpoints (method, path, operationId, tags, summary), the unique paths, and the spec's title/version, so an agent can learn what the server exposes without guessing URLs.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+      required: [],
+    },
+    outputSchema: SERVER_ENDPOINTS_OUTPUT_SCHEMA as unknown as Record<string, unknown>,
+    annotations: {
+      title: "Server Endpoints",
       readOnlyHint: true,
       destructiveHint: false,
       idempotentHint: true,
