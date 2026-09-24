@@ -316,6 +316,22 @@ export const TOOL_ARGUMENT_SPECS: Record<string, ToolArgumentSpec> = {
     confirmMainnet: CONFIRM_MAINNET,
     confirmPaid: CONFIRM_PAID,
   },
+  mindvault_dispute: {
+    resourceId: RESOURCE_ID,
+    action: {
+      kind: "enum",
+      required: true,
+      values: ["flag", "unflag"],
+    },
+    reason: {
+      kind: "string",
+      required: true,
+      minLength: 1,
+      maxLength: 500,
+    },
+    confirmMainnet: CONFIRM_MAINNET,
+    confirmPaid: CONFIRM_PAID,
+  },
   mindvault_check_state_permissions: {},
   mindvault_registry_health: {},
   mindvault_import_wallet: {

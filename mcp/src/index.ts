@@ -56,6 +56,7 @@ import {
   mockSetPrice,
   mockTransferOwnership,
   mockSetListed,
+  mockDisputeResource,
 } from "./mock.js";
 import { purchaseHistoryTool, recordPurchase } from "./purchaseHistory.js";
 import { Mutex } from "./mutex.js";
@@ -2082,6 +2083,111 @@ export async function setListed(resourceId: string, listed: boolean): Promise<st
   );
 }
 
+/**
+ * Flag or unflag a resource as a moderator using the vault-registry contract.
+ *
+ * - "flag"   calls open_dispute({id, admin}) → sets on-chain state to Disputed
+ * - "unflag" calls resolve_dispute({id, admin, state: {tag:"Listed"}}) → restores Listed
+ *
+ * The caller's wallet must hold a moderator/admin role on the registry contract.
+ * A reason string is required for auditability; it is included in the response
+ * but not written on-chain (the contract does not store dispute reasons).
+ */
+export async function disputeResource(
+  resourceId: string,
+  action: "flag" | "unflag",
+  reason: string,
+): Promise<string> {
+  const wallet = requireWallet();
+
+  if (_isMock()) return mockDisputeResource(resourceId, action, reason);
+
+  const client = createRegistryClient({
+    contractId: REGISTRY_CONTRACT_ID,
+    rpcUrl: SOROBAN_RPC_URL,
+    networkPassphrase: REGISTRY_NETWORK_PASSPHRASE,
+    publicKey: wallet.publicKey,
+  });
+
+  const operationLabel = action === "flag" ? "Flag resource" : "Unflag resource";
+
+  let tx: Awaited<ReturnType<typeof client.open_dispute | typeof client.resolve_dispute>>;
+  try {
+    if (action === "flag") {
+      tx = await client.open_dispute({ id: resourceId, admin: wallet.publicKey });
+    } else {
+      tx = await client.resolve_dispute({
+        id: resourceId,
+        admin: wallet.publicKey,
+        state: { tag: "Listed", values: undefined },
+      });
+    }
+  } catch (err: any) {
+    if (isTimeoutError(err)) {
+      throw mcpError(
+        mapTransportError({
+          operation: `${operationLabel} failed for resource "${resourceId}"`,
+          source: "soroban",
+          error: err,
+        }),
+      );
+    }
+    throw mcpError(
+      mapRegistryError({
+        operation: `${operationLabel} failed for resource "${resourceId}"`,
+        message: err?.message || String(err),
+      }),
+    );
+  }
+
+  const result = tx.result;
+  if (result.isErr()) {
+    const err = result.unwrapErr();
+    const notFound = err.message === RegistryErrors[2].message;
+    throw mcpError(
+      mapRegistryError({
+        operation: `${operationLabel} failed for resource "${resourceId}"`,
+        message: err.message,
+        notFound,
+      }),
+    );
+  }
+
+  const { Keypair } = await import("@stellar/stellar-sdk");
+  const keypair = Keypair.fromSecret(wallet.secretKey);
+  let sentTx;
+  try {
+    sentTx = await tx.signAndSend({
+      signTransaction: async (xdr: string) => {
+        const { Transaction } = await import("@stellar/stellar-sdk");
+        const stellarTx = new Transaction(xdr, REGISTRY_NETWORK_PASSPHRASE);
+        stellarTx.sign(keypair);
+        return { signedTxXdr: stellarTx.toXDR() };
+      },
+    });
+  } catch (err: any) {
+    throw mcpError(
+      mapRegistryError({
+        operation: `${operationLabel} submission failed for resource "${resourceId}"`,
+        message: err?.message || String(err),
+      }),
+    );
+  }
+
+  const txHash = sentTx?.sendTransactionResponse?.hash ?? null;
+  return JSON.stringify(
+    {
+      status: "success",
+      resourceId,
+      action,
+      reason,
+      txHash,
+    },
+    null,
+    2,
+  );
+}
+
 export async function registryLookup(resourceId: string): Promise<string> {
   if (_isMock())
     return mockRegistryLookup(resourceId, REGISTRY_CONTRACT_ID, currentWallet()?.publicKey);
@@ -2650,6 +2756,12 @@ async function dispatchToolOutcome(
         );
       case "mindvault_set_listed":
         return setListed(requiredString(args, "resourceId"), flag(args, "listed"));
+      case "mindvault_dispute":
+        return disputeResource(
+          requiredString(args, "resourceId"),
+          requiredString(args, "action") as "flag" | "unflag",
+          requiredString(args, "reason"),
+        );
       case "mindvault_tx_status":
         return txStatus(requiredString(args, "txHash"));
       case "mindvault_reset":

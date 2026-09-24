@@ -15,7 +15,7 @@ For structured JSON results (`structuredContent` + `outputSchema`) see
 For client installation and configuration see
 [mcp-client-configs.md](mcp-client-configs.md).
 
-**37 tools** as of last generation.
+**38 tools** as of last generation.
 
 ---
 
@@ -102,10 +102,11 @@ For client installation and configuration see
 
 ## Other
 
-| Tool                              | Description                                                                                                                                                                 | Structured |
-| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
-| `mindvault_recover_catalog_cache` | Attempt a catalog stale-cache recovery: requests the MCP to refresh or re-fetch catalog index data and provides recovery guidance. Useful when browse results appear stale. | yes        |
+| Tool                              | Description                                                                                                                                                                                                                                                                                                                                                                         | Structured |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| `mindvault_dispute`               | Flag or unflag a resource on the vault registry as a moderator. Flagging (action: flag) calls open_dispute and sets the resource state to Disputed, hiding it from the catalog. Unflagging (action: unflag) calls resolve_dispute and restores the Listed state. Requires a reason for auditability. The caller wallet must hold the moderator/admin role on the registry contract. | yes        |
+| `mindvault_recover_catalog_cache` | Attempt a catalog stale-cache recovery: requests the MCP to refresh or re-fetch catalog index data and provides recovery guidance. Useful when browse results appear stale.                                                                                                                                                                                                         | yes        |
 
 ---
 
-_This file was generated from `mcp/src/tools.ts` — 37 tools._
+_This file was generated from `mcp/src/tools.ts` — 38 tools._

@@ -499,6 +499,154 @@ exports[`tool schema snapshots > mindvault_check_state_permissions > input schem
 
 exports[`tool schema snapshots > mindvault_check_state_permissions > output schema 1`] = `null`;
 
+exports[`tool schema snapshots > mindvault_dispute > annotations 1`] = `
+{
+  "destructiveHint": false,
+  "idempotentHint": false,
+  "readOnlyHint": false,
+  "title": "Dispute Resource",
+}
+`;
+
+exports[`tool schema snapshots > mindvault_dispute > input schema 1`] = `
+{
+  "properties": {
+    "action": {
+      "description": "flag: open a dispute and set resource state to Disputed. unflag: resolve the dispute and restore Listed state.",
+      "enum": [
+        "flag",
+        "unflag",
+      ],
+      "examples": [
+        "flag",
+        "unflag",
+      ],
+      "type": "string",
+    },
+    "confirmMainnet": {
+      "description": "Required on mainnet (or set MINDVAULT_ALLOW_MAINNET=1). Explicitly confirm this mutation on the public Stellar network.",
+      "type": "boolean",
+    },
+    "confirmPaid": {
+      "description": "Required when the server runs with MINDVAULT_CONFIRM_PAID_OPERATIONS=usdc or =all. Explicitly confirm that this call may spend from the agent wallet. Ignored when the policy is off (the default) and on dry runs.",
+      "type": "boolean",
+    },
+    "reason": {
+      "description": "Human-readable reason for the flag or unflag action (required, 1-500 chars). Included in the response for auditability but not written on-chain.",
+      "examples": [
+        "Duplicate listing",
+        "False advertising",
+        "Dispute resolved by creator",
+      ],
+      "type": "string",
+    },
+    "resourceId": {
+      "description": "The on-chain resource ID to flag or unflag. Example: 'cm7x8y9z'",
+      "examples": [
+        "cm7x8y9z",
+        "res-001",
+      ],
+      "type": "string",
+    },
+  },
+  "required": [
+    "resourceId",
+    "action",
+    "reason",
+  ],
+  "type": "object",
+}
+`;
+
+exports[`tool schema snapshots > mindvault_dispute > output schema 1`] = `
+{
+  "oneOf": [
+    {
+      "properties": {
+        "listed": {
+          "type": "boolean",
+        },
+        "metadata": {
+          "type": "string",
+        },
+        "newCreator": {
+          "type": "string",
+        },
+        "price": {
+          "type": "string",
+        },
+        "resourceId": {
+          "type": "string",
+        },
+        "status": {
+          "type": "string",
+        },
+        "txHash": {
+          "type": [
+            "string",
+            "null",
+          ],
+        },
+      },
+      "required": [
+        "status",
+        "resourceId",
+        "txHash",
+      ],
+      "type": "object",
+    },
+    {
+      "properties": {
+        "intentions": {
+          "type": "object",
+        },
+        "mode": {
+          "const": "dry-run",
+          "type": "string",
+        },
+        "operation": {
+          "type": "string",
+        },
+        "steps": {
+          "items": {
+            "type": "string",
+          },
+          "type": "array",
+        },
+        "validation": {
+          "type": "object",
+        },
+      },
+      "required": [
+        "mode",
+        "operation",
+        "validation",
+        "intentions",
+        "steps",
+      ],
+      "type": "object",
+    },
+    {
+      "properties": {
+        "message": {
+          "type": "string",
+        },
+        "status": {
+          "const": "text",
+          "type": "string",
+        },
+      },
+      "required": [
+        "status",
+        "message",
+      ],
+      "type": "object",
+    },
+  ],
+  "type": "object",
+}
+`;
+
 exports[`tool schema snapshots > mindvault_export_receipts > annotations 1`] = `
 {
   "destructiveHint": false,
@@ -2978,6 +3126,7 @@ exports[`tool schema snapshots > the covered tool names are pinned 1`] = `
   "mindvault_check_bindings",
   "mindvault_check_consistency",
   "mindvault_check_state_permissions",
+  "mindvault_dispute",
   "mindvault_export_receipts",
   "mindvault_import_wallet",
   "mindvault_list_profiles",

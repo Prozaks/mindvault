@@ -894,6 +894,48 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     },
   },
   {
+    name: "mindvault_dispute",
+    description:
+      "Flag or unflag a resource on the vault registry as a moderator. Flagging (action: flag) calls open_dispute and sets the resource state to Disputed, hiding it from the catalog. Unflagging (action: unflag) calls resolve_dispute and restores the Listed state. Requires a reason for auditability. The caller wallet must hold the moderator/admin role on the registry contract.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        resourceId: {
+          type: "string",
+          description: "The on-chain resource ID to flag or unflag. Example: 'cm7x8y9z'",
+          examples: ["cm7x8y9z", "res-001"],
+        },
+        action: {
+          type: "string",
+          enum: ["flag", "unflag"],
+          description:
+            "flag: open a dispute and set resource state to Disputed. unflag: resolve the dispute and restore Listed state.",
+          examples: ["flag", "unflag"],
+        },
+        reason: {
+          type: "string",
+          description:
+            "Human-readable reason for the flag or unflag action (required, 1-500 chars). Included in the response for auditability but not written on-chain.",
+          examples: ["Duplicate listing", "False advertising", "Dispute resolved by creator"],
+        },
+        confirmMainnet: {
+          type: "boolean",
+          description:
+            "Required on mainnet (or set MINDVAULT_ALLOW_MAINNET=1). Explicitly confirm this mutation on the public Stellar network.",
+        },
+        confirmPaid: { ...CONFIRM_PAID_PROPERTY },
+      },
+      required: ["resourceId", "action", "reason"],
+    },
+    outputSchema: ONCHAIN_MUTATION_OUTPUT_SCHEMA as unknown as Record<string, unknown>,
+    annotations: {
+      title: "Dispute Resource",
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+    },
+  },
+  {
     name: "mindvault_check_state_permissions",
     description:
       "Verify the state file (~/.mindvault/state.json) has safe permissions (mode 0600). Warns when the file is world-readable or group-readable, which would expose wallet secret keys and API keys to other system users. Safe by default; run after any manual file operations or environment migration.",

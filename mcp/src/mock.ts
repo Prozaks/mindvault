@@ -386,6 +386,26 @@ export function mockSetListed(resourceId: string, listed: boolean): string {
   );
 }
 
+export function mockDisputeResource(
+  resourceId: string,
+  action: "flag" | "unflag",
+  reason: string,
+): string {
+  return JSON.stringify(
+    {
+      status: "success",
+      resourceId,
+      action,
+      reason,
+      txHash: `MOCK_TX_DISPUTE_${action.toUpperCase()}_${resourceId}`,
+      explorerUrl: explorerTxUrl(`MOCK_TX_DISPUTE_${action.toUpperCase()}_${resourceId}`),
+      source: "on-chain (mock)",
+    },
+    null,
+    2,
+  );
+}
+
 /**
  * Deterministic mock receipt for buy flows. Returns a purchase receipt object
  * that mirrors the shape of a real x402 payment receipt, with deterministic
