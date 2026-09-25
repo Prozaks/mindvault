@@ -126,6 +126,11 @@ export interface CatalogPage {
   next_cursor: Option<u32>;
 }
 
+export interface TagPopularity {
+  count: u32;
+  tag: string;
+}
+
 /**
  * Structured payload published with the `setprice` event.
  * Includes the resource id, the price before and after the update, and the
@@ -261,6 +266,11 @@ export interface Client {
     { id, tags }: { id: string; tags: Array<string> },
     options?: MethodOptions,
   ) => Promise<AssembledTransaction<Result<void>>>;
+
+  top_tags: (
+    { limit }: { limit: u32 },
+    options?: MethodOptions,
+  ) => Promise<AssembledTransaction<Array<TagPopularity>>>;
 
   get_owner: (
     { id }: { id: string },
@@ -468,6 +478,8 @@ export class Client extends ContractClient {
         "AAAAAQAAAOtFdmVudCBkYXRhIGVtaXR0ZWQgd2hlbiBhIHJlc291cmNlJ3MgbWV0YWRhdGEgcG9pbnRlciBpcyB1cGRhdGVkLgpDYXJyaWVzIHRoZSByZXNvdXJjZSBpZCwgdGhlIHByZXZpb3VzIG1ldGFkYXRhIHBvaW50ZXIsIGFuZCB0aGUgbmV3IG9uZQpzbyB0aGF0IG9mZi1jaGFpbiBpbmRleGVycyBjYW4gYnVpbGQgYSBmdWxsIGF1ZGl0IHRyYWlsIHdpdGhvdXQgcXVlcnlpbmcKaGlzdG9yaWNhbCBsZWRnZXIgc3RhdGUuAAAAAAAAAAATTWV0YWRhdGFVcGRhdGVFdmVudAAAAAADAAAAAAAAAAJpZAAAAAAAEAAAAAAAAAAMbmV3X21ldGFkYXRhAAAAEAAAAAAAAAAMb2xkX21ldGFkYXRhAAAAEA==",
         "AAAAAAAAAJ5OdW1iZXIgb2YgcmVzb3VyY2VzIGN1cnJlbnRseSBvd25lZCBieSBgY3JlYXRvcmAgKG1vdmVzIHdpdGgKYHRyYW5zZmVyX293bmVyc2hpcGAvYGFjY2VwdF90cmFuc2ZlcmA7IHVucmVsYXRlZCB0byB0aGUgbW9ub3RvbmljLApuZXZlci1kZWNyZW1lbnRlZCBgY291bnQoKWApLgAAAAAAFmNyZWF0b3JfcmVzb3VyY2VfY291bnQAAAAAAAEAAAAAAAAAB2NyZWF0b3IAAAAAEwAAAAEAAAAE",
         "AAAAAAAAAVRVcGRhdGUgYSByZXNvdXJjZSdzIG9uLWNoYWluIHZlcmlmaWNhdGlvbiBzdGF0dXMuIE9ubHkgYW4gYWRkcmVzcwpjdXJyZW50bHkgaG9sZGluZyB0aGUgdmVyaWZpZXIgcm9sZSAoc2VlIGBhZGRfdmVyaWZpZXJgKSBtYXkgY2FsbAp0aGlzLiBPbmx5IGBQZW5kaW5nIC0+IFZlcmlmaWVkYCwgYFBlbmRpbmcgLT4gUmVqZWN0ZWRgLApgVmVyaWZpZWQgLT4gUmVqZWN0ZWRgLCBhbmQgYFJlamVjdGVkIC0+IFZlcmlmaWVkYCBhcmUgYWxsb3dlZDsKc2VsZi10cmFuc2l0aW9ucyBhbmQgcmV2ZXJ0aW5nIHRvIGBQZW5kaW5nYCBlcnJvciB3aXRoCmBJbnZhbGlkVmVyaWZpY2F0aW9uVHJhbnNpdGlvbmAuAAAAF3NldF92ZXJpZmljYXRpb25fc3RhdHVzAAAAAAMAAAAAAAAAAmlkAAAAAAAQAAAAAAAAAAh2ZXJpZmllcgAAABMAAAAAAAAABnN0YXR1cwAAAAAH0AAAABJWZXJpZmljYXRpb25TdGF0dXMAAAAAAAEAAAPpAAAD7QAAAAAAAAAD",
+        "AAAAAQAAAAAAAAAAAAAADVRhZ1BvcHVsYXJpdHkAAAAAAAACAAAAAAAAAAVjb3VudAAAAAAAAAQAAAAAAAAAA3RhZwAAAAAQ",
+        "AAAAAAAAAAAAAAAIdG9wX3RhZ3MAAAABAAAAAAAAAAVsaW1pdAAAAAAAAAQAAAABAAAD6gAAB9AAAAANVGFnUG9wdWxhcml0eQAAAA==",
       ]),
       options,
     );
@@ -481,6 +493,7 @@ export class Client extends ContractClient {
     exists: this.txFromJSON<boolean>,
     register: this.txFromJSON<Result<void>>,
     set_tags: this.txFromJSON<Result<void>>,
+    top_tags: this.txFromJSON<Array<TagPopularity>>,
     get_owner: this.txFromJSON<Result<string>>,
     list_page: this.txFromJSON<CatalogPage>,
     set_price: this.txFromJSON<Result<void>>,

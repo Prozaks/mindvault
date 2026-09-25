@@ -8135,7 +8135,7 @@ fn storage_key_variant(env: &Env, key: &DataKey) -> Symbol {
 /// Every `DataKey` variant, with the name and arity it must keep across
 /// upgrades. Adding a variant means adding a row here — the exhaustive match in
 /// `storage_key_migration_covers_every_variant` will not compile until you do.
-fn storage_key_wire_contract(env: &Env) -> [(DataKey, &'static str, u32); 25] {
+fn storage_key_wire_contract(env: &Env) -> [(DataKey, &'static str, u32); 27] {
     let id = String::from_str(env, "migkey");
     let who = Address::generate(env);
     [
@@ -8178,8 +8178,10 @@ fn storage_key_wire_contract(env: &Env) -> [(DataKey, &'static str, u32); 25] {
         (DataKey::ListedCount, "ListedCount", 1),
         (DataKey::FlagReasonHash(id.clone()), "FlagReasonHash", 2),
         (DataKey::PaymentTxHash(id.clone()), "PaymentTxHash", 2),
-        (DataKey::AttestationHash(id), "AttestationHash", 2),
+        (DataKey::AttestationHash(id.clone()), "AttestationHash", 2),
         (DataKey::PendingAdminExpiry, "PendingAdminExpiry", 1),
+        (DataKey::TagCount(id.clone()), "TagCount", 2),
+        (DataKey::TopTags, "TopTags", 1),
     ]
 }
 
@@ -8221,7 +8223,7 @@ fn storage_key_migration_covers_every_variant() {
     let contract = storage_key_wire_contract(&env);
     assert_eq!(
         contract.len(),
-        25,
+        27,
         "storage_key_wire_contract must list every DataKey variant"
     );
 
@@ -8252,6 +8254,8 @@ fn storage_key_migration_covers_every_variant() {
             DataKey::PaymentTxHash(_) => "PaymentTxHash",
             DataKey::AttestationHash(_) => "AttestationHash",
             DataKey::PendingAdminExpiry => "PendingAdminExpiry",
+            DataKey::TagCount(_) => "TagCount",
+            DataKey::TopTags => "TopTags",
         };
         assert_eq!(
             matched, *name,
@@ -8411,6 +8415,65 @@ fn registered_state_survives_a_redeploy_at_the_same_address() {
         1,
         "tag index lost across redeploy"
     );
+}
+
+#[test]
+fn tag_popularity_starts_empty_for_pre_upgrade_resources() {
+    let (env, creator, client) = setup();
+    let legacy_id = String::from_str(&env, "poplegacy");
+    let legacy_tag = String::from_str(&env, "legacy");
+    client.register(
+        &creator,
+        &legacy_id,
+        &100i128,
+        &String::from_str(&env, "ipfs://legacy"),
+        &tags(&env, &["legacy"]),
+    );
+    env.as_contract(&client.address, || {
+        env.storage()
+            .instance()
+            .remove(&DataKey::TagCount(legacy_tag.clone()));
+        env.storage().instance().remove(&DataKey::TopTags);
+    });
+
+    env.register_at(&client.address, VaultRegistry, ());
+    let upgraded = VaultRegistryClient::new(&env, &client.address);
+    assert_eq!(upgraded.top_tags(&20u32).len(), 0);
+    assert_eq!(
+        upgraded
+            .list_by_tag(&String::from_str(&env, "legacy"), &0u32, &10u32)
+            .len(),
+        1
+    );
+
+    upgraded.register(
+        &creator,
+        &String::from_str(&env, "popnew1"),
+        &100i128,
+        &String::from_str(&env, "ipfs://new1"),
+        &tags(&env, &["legacy"]),
+    );
+    upgraded.register(
+        &creator,
+        &String::from_str(&env, "popnew2"),
+        &100i128,
+        &String::from_str(&env, "ipfs://new2"),
+        &tags(&env, &["new"]),
+    );
+    upgraded.register(
+        &creator,
+        &String::from_str(&env, "popnew3"),
+        &100i128,
+        &String::from_str(&env, "ipfs://new3"),
+        &tags(&env, &["new"]),
+    );
+
+    let top = upgraded.top_tags(&20u32);
+    assert_eq!(top.len(), 2);
+    assert_eq!(top.get(0).unwrap().tag, String::from_str(&env, "new"));
+    assert_eq!(top.get(0).unwrap().count, 2);
+    assert_eq!(top.get(1).unwrap().tag, String::from_str(&env, "legacy"));
+    assert_eq!(top.get(1).unwrap().count, 1);
 }
 
 #[test]
@@ -9503,6 +9566,141 @@ fn record_payment_allows_same_receipt_id_with_different_tx_hash() {
     );
     assert_eq!(client.get_payment(&String::from_str(&env, "rcpt-only")).tx_hash, tx_a);
     assert_eq!(client.get_payment(&String::from_str(&env, "rcpt-second")).tx_hash, tx_b);
+}
+
+#[test]
+fn top_tags_counts_successful_registrations_by_normalized_tag() {
+    let (env, creator, client) = setup();
+    assert_eq!(client.top_tags(&20u32).len(), 0);
+
+    client.register(
+        &creator,
+        &String::from_str(&env, "popr1"),
+        &100i128,
+        &String::from_str(&env, "ipfs://m"),
+        &tags(&env, &["DataSet", "common"]),
+    );
+    client.register(
+        &creator,
+        &String::from_str(&env, "popr2"),
+        &100i128,
+        &String::from_str(&env, "ipfs://m"),
+        &tags(&env, &["dataset", "other"]),
+    );
+    client.register(
+        &creator,
+        &String::from_str(&env, "popr3"),
+        &100i128,
+        &String::from_str(&env, "ipfs://m"),
+        &tags(&env, &["COMMON"]),
+    );
+
+    let top = client.top_tags(&20u32);
+    assert_eq!(top.len(), 3);
+    assert_eq!(top.get(0).unwrap().tag, String::from_str(&env, "common"));
+    assert_eq!(top.get(0).unwrap().count, 2);
+    assert_eq!(top.get(1).unwrap().tag, String::from_str(&env, "dataset"));
+    assert_eq!(top.get(1).unwrap().count, 2);
+    assert_eq!(top.get(2).unwrap().tag, String::from_str(&env, "other"));
+    assert_eq!(top.get(2).unwrap().count, 1);
+}
+
+#[test]
+fn whitespace_only_tags_are_rejected_before_counting() {
+    let (env, creator, client) = setup();
+    assert_eq!(
+        client.try_register(
+            &creator,
+            &String::from_str(&env, "popblank"),
+            &100i128,
+            &String::from_str(&env, "ipfs://m"),
+            &tags(&env, &[" \t"]),
+        ),
+        Err(Ok(Error::InvalidTag))
+    );
+    assert_eq!(client.top_tags(&20u32).len(), 0);
+}
+
+#[test]
+fn top_tags_ignores_failed_registrations_and_later_tag_replacements() {
+    let (env, creator, client) = setup();
+    let id = String::from_str(&env, "popr4");
+    let metadata = String::from_str(&env, "ipfs://m");
+    let original = tags(&env, &["original"]);
+    client.register(&creator, &id, &100i128, &metadata, &original);
+
+    assert_eq!(
+        client.try_register(
+            &creator,
+            &id,
+            &100i128,
+            &metadata,
+            &tags(&env, &["duplicate"]),
+        ),
+        Err(Ok(Error::AlreadyRegistered))
+    );
+    client.set_tags(&id, &tags(&env, &["replacement"]));
+
+    let top = client.top_tags(&20u32);
+    assert_eq!(top.len(), 1);
+    assert_eq!(top.get(0).unwrap().tag, String::from_str(&env, "original"));
+    assert_eq!(top.get(0).unwrap().count, 1);
+}
+
+#[test]
+fn top_tags_caps_the_response_and_honors_zero_limit() {
+    let (env, creator, client) = setup();
+    for i in 0..(TOP_TAGS_CAP + 5) {
+        let id = format!("popcap{:02}", i);
+        let tag = format!("tag{:02}", i);
+        client.register(
+            &creator,
+            &String::from_str(&env, &id),
+            &100i128,
+            &String::from_str(&env, "ipfs://m"),
+            &tags(&env, &[tag.as_str()]),
+        );
+    }
+
+    assert_eq!(client.top_tags(&0u32).len(), 0);
+    let top = client.top_tags(&(TOP_TAGS_CAP + 5));
+    assert_eq!(top.len(), TOP_TAGS_CAP);
+    assert_eq!(top.get(0).unwrap().tag, String::from_str(&env, "tag00"));
+    assert_eq!(top.get(19).unwrap().tag, String::from_str(&env, "tag19"));
+
+    client.register(
+        &creator,
+        &String::from_str(&env, "popreenter"),
+        &100i128,
+        &String::from_str(&env, "ipfs://m"),
+        &tags(&env, &["tag20"]),
+    );
+    let top = client.top_tags(&TOP_TAGS_CAP);
+    assert_eq!(top.get(0).unwrap().tag, String::from_str(&env, "tag20"));
+    assert_eq!(top.get(0).unwrap().count, 2);
+}
+
+#[test]
+fn tag_popularity_counter_saturates_at_u32_max() {
+    let (env, creator, client) = setup();
+    let maxed_tag = String::from_str(&env, "maxed");
+    env.as_contract(&client.address, || {
+        env.storage()
+            .instance()
+            .set(&DataKey::TagCount(maxed_tag.clone()), &u32::MAX);
+    });
+
+    client.register(
+        &creator,
+        &String::from_str(&env, "popmax"),
+        &100i128,
+        &String::from_str(&env, "ipfs://m"),
+        &tags(&env, &["maxed"]),
+    );
+
+    let top = client.top_tags(&1u32);
+    assert_eq!(top.get(0).unwrap().tag, String::from_str(&env, "maxed"));
+    assert_eq!(top.get(0).unwrap().count, u32::MAX);
 }
 
 include!("test/lifecycle_events.rs");

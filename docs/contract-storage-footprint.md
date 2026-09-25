@@ -39,6 +39,8 @@ baseline for comparing one revision of the contract against another.
 | Resource (typical)         | persistent |  48 |   528 |   576 |    640 |
 | Index(u32) -> id           | persistent |  36 |    32 |    68 |     96 |
 | Count                      | instance   |  28 |     8 |    36 |     48 |
+| TagCount (max-size tag)    | instance   |  68 |     8 |    76 |    160 |
+| TopTags                    | instance   |  28 |  1772 |  1800 |   2000 |
 | CreatorResources           | persistent |  76 |    64 |   140 |    160 |
 | CreatorCount               | instance   |  72 |     8 |    80 |     96 |
 | TagIndex (max-size tag)    | persistent |  68 |    44 |   112 |    160 |
@@ -55,14 +57,15 @@ baseline for comparing one revision of the contract against another.
 
 Aggregates, which are the numbers that scale with usage:
 
-| Operation                                                         | Bytes | Budget |
-| ----------------------------------------------------------------- | ----: | -----: |
-| One max-size registration (`Resource` + `Index` + one `TagIndex`) |  1728 |   1900 |
-| One payment (`PaymentReceipt` + `PaymentIndex`)                   |   756 |    850 |
+| Operation                                                                          | Bytes | Budget |
+| ---------------------------------------------------------------------------------- | ----: | -----: |
+| One max-size registration (`Resource` + `Index` + one `TagIndex` + one `TagCount`) |  1868 |   1900 |
+| One payment (`PaymentReceipt` + `PaymentIndex`)                                    |   756 |    850 |
 
-A registration with all 8 tags writes 8 `TagIndex` entries, one per tag, plus
-the `CreatorResources` and `CreatorCount` updates — the aggregate above counts
-a single tag so the per-tag cost stays visible.
+A registration with all 8 tags writes 8 `TagIndex` and 8 `TagCount` entries, one
+per tag, plus the `CreatorResources` and `CreatorCount` updates — the aggregate
+above counts one of each so the per-tag cost stays visible. `TopTags` is a
+shared bounded view and is not included in the per-registration aggregate.
 
 ## Notes on individual entries
 
@@ -75,10 +78,15 @@ a single tag so the per-tag cost stays visible.
   measured at this fixture's cardinality (two resources for the creator, one
   resource per tag); read them as a per-member baseline. Each additional member
   adds roughly one id's worth of bytes.
-- **Instance entries** (`Count`, `CreatorCount`, `FeeConfig`, `Admin`, and the
-  three role grants) share the contract's instance TTL, so they are bumped
-  together and never archive independently. They are all small; `CreatorCount`
-  is the only one that grows with the number of distinct creators.
+- **`TagCount`** stores one bounded `u32` counter per distinct tag, so it grows with
+  tag cardinality rather than resource count. **`TopTags`** stores the bounded
+  materialized view returned by `top_tags`; the fixture fills all 20 entries
+  with maximum-size tags.
+- **Instance entries** (`Count`, `TagCount`, `TopTags`, `CreatorCount`,
+  `FeeConfig`, `Admin`, and the three role grants) share the contract's instance
+  TTL, so they are bumped together and never archive independently. `TagCount`
+  grows with distinct tags and `TopTags` is capped at 20 entries; `CreatorCount`
+  grows with the number of distinct creators.
 - **`DataKey::DisputeFlag` is never written.** The dispute flag lives on the
   `Resource` struct (see `flag_resource`), so the key exists in the `DataKey`
   enum without a corresponding entry.

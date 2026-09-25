@@ -160,6 +160,7 @@ describe("generated bindings (drift guard)", () => {
     "set_listed",
     "set_price",
     "set_tags",
+    "top_tags",
     "set_terms_hash",
     "set_verification_status",
     "tombstone_resource",
