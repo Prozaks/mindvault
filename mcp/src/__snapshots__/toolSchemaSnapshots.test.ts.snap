@@ -2601,7 +2601,7 @@ exports[`tool schema snapshots > mindvault_terms > input schema 1`] = `
       "type": "string",
     },
     "termsHash": {
-      "description": "Terms document hash or content-addressed digest to store. Required for set.",
+      "description": "Terms document hash or content-addressed digest to store (maximum 64 bytes). Required for set.",
       "examples": [
         "sha256:0123456789abcdef",
       ],
