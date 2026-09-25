@@ -35,6 +35,8 @@ Generated: 2026-08-29
 - `mindvault_update_metadata`: Update the on-chain metadata pointer for a registered resource (owner-only).
 - `mindvault_set_price`: Update on-chain price for a registered resource (owner-only).
 - `mindvault_transfer_ownership`: Transfer ownership of a registered resource to another Stellar address.
+- `mindvault_accept_transfer`: Accept a pending ownership transfer of a registered resource (proposed new owner only).
+- `mindvault_cancel_transfer`: Cancel a pending ownership transfer of a registered resource (current owner only).
 - `mindvault_set_listed`: Change the listed state (listed/delisted) of a resource (owner-only).
 - `mindvault_check_state_permissions`: Verify state file permissions are safe (mode 0600 recommended).
 - `mindvault_registry_health`: Check health of dependencies: MindVault API, Horizon, Soroban RPC, contract, and network alignment.

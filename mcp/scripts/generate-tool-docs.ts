@@ -56,6 +56,8 @@ function groupOf(name: string): string {
       "mindvault_set_price",
       "mindvault_set_tags",
       "mindvault_transfer_ownership",
+      "mindvault_accept_transfer",
+      "mindvault_cancel_transfer",
       "mindvault_set_listed",
     ].includes(name)
   )

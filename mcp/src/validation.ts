@@ -272,6 +272,14 @@ export const TOOL_ARGUMENT_SPECS: Record<string, ToolArgumentSpec> = {
     newCreator: { ...STELLAR_ADDRESS, required: true },
     confirmMainnet: CONFIRM_MAINNET,
   },
+  mindvault_accept_transfer: {
+    resourceId: RESOURCE_ID,
+    confirmMainnet: CONFIRM_MAINNET,
+  },
+  mindvault_cancel_transfer: {
+    resourceId: RESOURCE_ID,
+    confirmMainnet: CONFIRM_MAINNET,
+  },
   mindvault_set_listed: {
     resourceId: RESOURCE_ID,
     listed: { kind: "flag", required: true },

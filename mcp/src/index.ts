@@ -65,10 +65,11 @@ import {
   mockUpdateMetadata,
   mockSetPrice,
   mockTransferOwnership,
+  mockAcceptTransfer,
+  mockCancelTransfer,
   mockSetListed,
 } from "./mock.js";
 import { purchaseHistoryTool, recordPurchase } from "./purchaseHistory.js";
-import { Mutex } from "./mutex.js";
 import { EXTRA_OUTPUT_SCHEMAS } from "./outputSchemas.js";
 import { exportReceiptsTool } from "./receipts.js";
 import { normalizeToolResult, outcomeText, type ToolOutcome } from "./toolResult.js";
@@ -106,7 +107,6 @@ import {
 } from "./publishStatus.js";
 import { type ApiResponse } from "./apiResponse.js";
 import { safeErrorMessage, safeLog } from "./redaction.js";
-import { safeErrorMessage } from "./redaction.js";
 import { assertAutoPaymentWithinCeiling } from "./paymentCeiling.js";
 import { signMutatingHeaders } from "./requestSignature.js";
 import {
@@ -2073,9 +2073,163 @@ export async function setListed(resourceId: string, listed: boolean): Promise<st
   );
 }
 
+export async function acceptTransfer(resourceId: string): Promise<string> {
+  const wallet = requireWallet();
+  if (_isMock()) return mockAcceptTransfer(resourceId);
+
+  const client = createRegistryClient({
+    contractId: REGISTRY_CONTRACT_ID,
+    rpcUrl: SOROBAN_RPC_URL,
+    networkPassphrase: REGISTRY_NETWORK_PASSPHRASE,
+    publicKey: wallet.publicKey,
+  });
+
+  let tx: Awaited<ReturnType<typeof client.accept_transfer>>;
+  try {
+    tx = await client.accept_transfer({ id: resourceId });
+  } catch (err: any) {
+    if (isTimeoutError(err)) {
+      throw mcpError(
+        mapTransportError({
+          operation: `Accept transfer failed for resource "${resourceId}"`,
+          source: "soroban",
+          error: err,
+        }),
+      );
+    }
+    throw mcpError(
+      mapRegistryError({
+        operation: `Accept transfer failed for resource "${resourceId}"`,
+        message: err?.message || String(err),
+      }),
+    );
+  }
+
+  const result = tx.result;
+  if (result.isErr()) {
+    const err = result.unwrapErr();
+    const notFound = err.message === RegistryErrors[2].message;
+    throw mcpError(
+      mapRegistryError({
+        operation: `Accept transfer failed for resource "${resourceId}"`,
+        message: err.message,
+        notFound,
+      }),
+    );
+  }
+
+  const { Keypair } = await import("@stellar/stellar-sdk");
+  const keypair = Keypair.fromSecret(wallet.secretKey);
+  let sentTx;
+  try {
+    sentTx = await tx.signAndSend({
+      signTransaction: async (xdr: string) => {
+        const { Transaction } = await import("@stellar/stellar-sdk");
+        const stellarTx = new Transaction(xdr, REGISTRY_NETWORK_PASSPHRASE);
+        stellarTx.sign(keypair);
+        return { signedTxXdr: stellarTx.toXDR() };
+      },
+    });
+  } catch (err: any) {
+    throw mcpError(
+      mapRegistryError({
+        operation: `Accept transfer submission failed for resource "${resourceId}"`,
+        message: err?.message || String(err),
+      }),
+    );
+  }
+
+  const txHash = sentTx?.sendTransactionResponse?.hash ?? null;
+  return JSON.stringify(
+    {
+      status: "success",
+      resourceId,
+      txHash,
+    },
+    null,
+    2,
+  );
+}
+
+export async function cancelTransfer(resourceId: string): Promise<string> {
+  const wallet = requireWallet();
+  if (_isMock()) return mockCancelTransfer(resourceId);
+
+  const client = createRegistryClient({
+    contractId: REGISTRY_CONTRACT_ID,
+    rpcUrl: SOROBAN_RPC_URL,
+    networkPassphrase: REGISTRY_NETWORK_PASSPHRASE,
+    publicKey: wallet.publicKey,
+  });
+
+  let tx: Awaited<ReturnType<typeof client.cancel_transfer>>;
+  try {
+    tx = await client.cancel_transfer({ id: resourceId });
+  } catch (err: any) {
+    if (isTimeoutError(err)) {
+      throw mcpError(
+        mapTransportError({
+          operation: `Cancel transfer failed for resource "${resourceId}"`,
+          source: "soroban",
+          error: err,
+        }),
+      );
+    }
+    throw mcpError(
+      mapRegistryError({
+        operation: `Cancel transfer failed for resource "${resourceId}"`,
+        message: err?.message || String(err),
+      }),
+    );
+  }
+
+  const result = tx.result;
+  if (result.isErr()) {
+    const err = result.unwrapErr();
+    const notFound = err.message === RegistryErrors[2].message;
+    throw mcpError(
+      mapRegistryError({
+        operation: `Cancel transfer failed for resource "${resourceId}"`,
+        message: err.message,
+        notFound,
+      }),
+    );
+  }
+
+  const { Keypair } = await import("@stellar/stellar-sdk");
+  const keypair = Keypair.fromSecret(wallet.secretKey);
+  let sentTx;
+  try {
+    sentTx = await tx.signAndSend({
+      signTransaction: async (xdr: string) => {
+        const { Transaction } = await import("@stellar/stellar-sdk");
+        const stellarTx = new Transaction(xdr, REGISTRY_NETWORK_PASSPHRASE);
+        stellarTx.sign(keypair);
+        return { signedTxXdr: stellarTx.toXDR() };
+      },
+    });
+  } catch (err: any) {
+    throw mcpError(
+      mapRegistryError({
+        operation: `Cancel transfer submission failed for resource "${resourceId}"`,
+        message: err?.message || String(err),
+      }),
+    );
+  }
+
+  const txHash = sentTx?.sendTransactionResponse?.hash ?? null;
+  return JSON.stringify(
+    {
+      status: "success",
+      resourceId,
+      txHash,
+    },
+    null,
+    2,
+  );
+}
+
 export async function registryLookup(resourceId: string): Promise<string> {
-  if (_isMock())
-    return mockRegistryLookup(resourceId, REGISTRY_CONTRACT_ID, currentWallet()?.publicKey);
   const client = createRegistryClient({
     contractId: REGISTRY_CONTRACT_ID,
     rpcUrl: SOROBAN_RPC_URL,
@@ -2533,6 +2687,8 @@ const STATE_MUTATING_TOOLS = new Set([
   "mindvault_update_metadata",
   "mindvault_set_price",
   "mindvault_transfer_ownership",
+  "mindvault_accept_transfer",
+  "mindvault_cancel_transfer",
   "mindvault_set_listed",
   "mindvault_set_tags",
   "mindvault_reset",
@@ -2650,6 +2806,10 @@ async function dispatchToolOutcome(
           requiredString(args, "resourceId"),
           requiredString(args, "newCreator"),
         );
+      case "mindvault_accept_transfer":
+        return acceptTransfer(requiredString(args, "resourceId"));
+      case "mindvault_cancel_transfer":
+        return cancelTransfer(requiredString(args, "resourceId"));
       case "mindvault_set_listed":
         return setListed(requiredString(args, "resourceId"), flag(args, "listed"));
       case "mindvault_tx_status":
