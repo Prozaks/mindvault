@@ -4,6 +4,7 @@
 import { describe, expect, it } from "vitest";
 import { dryRunBuy, dryRunPublish } from "./dryRun.js";
 import {
+  ATTESTATION_VERIFICATION_OUTPUT_SCHEMA,
   CATALOG_LIST_OUTPUT_SCHEMA,
   LIST_PROFILES_OUTPUT_SCHEMA,
   PREVIEW_OUTPUT_SCHEMA,
@@ -123,6 +124,19 @@ describe("representative payloads match advertised required keys", () => {
 
     const buy = dryRunBuy("res-001", "stellar:testnet", "https://example.com", true, "1.5");
     expect(buy.mode).toBe("dry-run");
+  });
+
+  it("attestation verification matches its required keys", () => {
+    assertKeys(ATTESTATION_VERIFICATION_OUTPUT_SCHEMA, {
+      source: "on-chain",
+      resourceId: "res-001",
+      expectedAttestationHash: "a".repeat(64),
+      registeredAttestationHash: "a".repeat(64),
+      matches: true,
+      verified: true,
+      summary: "Attestation hash matches the value registered on-chain.",
+      contract: "C…",
+    });
   });
 
   it("registry miss / recover / text fallback", () => {

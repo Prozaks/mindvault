@@ -98,6 +98,14 @@ const RESOURCE_ID: ArgumentSpec = {
   patternHint: "letters, digits, dot, dash, or underscore (max 128 chars)",
 };
 
+const ON_CHAIN_RESOURCE_ID: ArgumentSpec = {
+  kind: "string",
+  required: true,
+  maxLength: 24,
+  pattern: /^[a-z0-9]+$/,
+  patternHint: "1–24 lowercase letters or digits",
+};
+
 /** Same rules as profiles.isValidProfileName, expressed as a spec. */
 const PROFILE_NAME: ArgumentSpec = {
   kind: "string",
@@ -141,6 +149,8 @@ const METADATA_POINTER: ArgumentSpec = {
   patternHint:
     "a valid metadata pointer starting with ipfs://, ar://, http(s)://, sha256:, sha-256:, or 0x (max 512 chars)",
 };
+
+const ATTESTATION_HASH: ArgumentSpec = { kind: "string", required: true, maxLength: 64 };
 
 /** Backup passphrases must survive a round-trip through stateBackup.ts. */
 const PASSPHRASE: ArgumentSpec = { kind: "string", required: true, minLength: 8, maxLength: 512 };
@@ -266,6 +276,10 @@ export const TOOL_ARGUMENT_SPECS: Record<string, ToolArgumentSpec> = {
   mindvault_check_consistency: {
     resourceId: RESOURCE_ID,
     expectedMetadataHash: { kind: "hash" },
+  },
+  mindvault_verify_attestation: {
+    resourceId: ON_CHAIN_RESOURCE_ID,
+    attestationHash: ATTESTATION_HASH,
   },
   mindvault_registry_lookup: { resourceId: RESOURCE_ID },
   mindvault_registry_list: {

@@ -313,6 +313,32 @@ export const CONSISTENCY_OUTPUT_SCHEMA = {
   ],
 } as const;
 
+export const ATTESTATION_VERIFICATION_OUTPUT_SCHEMA = {
+  type: "object",
+  properties: {
+    source: { type: "string" },
+    resourceId: { type: "string" },
+    expectedAttestationHash: { type: "string" },
+    registeredAttestationHash: { type: ["string", "null"] },
+    matches: { type: "boolean" },
+    verified: { type: "boolean" },
+    summary: { type: "string" },
+    contract: { type: "string" },
+    network: { type: ["string", "null"] },
+    rpc: { type: ["string", "null"] },
+  },
+  required: [
+    "source",
+    "resourceId",
+    "expectedAttestationHash",
+    "registeredAttestationHash",
+    "matches",
+    "verified",
+    "summary",
+    "contract",
+  ],
+} as const;
+
 export const AGENT_STATUS_OUTPUT_SCHEMA = {
   type: "object",
   additionalProperties: true,

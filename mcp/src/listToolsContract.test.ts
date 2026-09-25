@@ -182,6 +182,7 @@ const SAMPLE_OVERRIDES: Record<string, Record<string, unknown>> = {
     newCreator: "GA6HCMBLTZS5VYYBCATRBRZ3BZJMAFUDKYYF6AH6MVCMGWMRDNSWJPIH",
   },
   mindvault_update_metadata: { metadata: "ipfs://QmProbe" },
+  mindvault_verify_attestation: { resourceId: "contractprobe" },
   mindvault_import_wallet: {
     secretKey: "SAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
   },

@@ -2,7 +2,7 @@
 
 This file is a generated, human-readable summary of the MCP tool surface (ListTools). It is scoped to the `mcp/` package and intended as a quick reference for integrators and reviewers.
 
-Generated: 2026-08-29
+Generated: 2026-09-25
 
 ## Tools
 
@@ -24,6 +24,7 @@ Generated: 2026-08-29
 - `mindvault_network_profile`: Report current Stellar/x402 network configuration and warnings.
 - `mindvault_check_bindings`: Verify registry-client bindings match deployed contract interface.
 - `mindvault_check_consistency`: Compare a resource from the API catalog with the same resource on-chain.
+- `mindvault_verify_attestation`: Compare a supplied attestation hash with the value registered on-chain.
 - `mindvault_registry_lookup`: Look up a resource directly from the on-chain vault registry by ID.
 - `mindvault_registry_list`: List resources registered on-chain with pagination.
 - `mindvault_tx_status`: Look up the status of a Stellar transaction by hash via Soroban RPC.

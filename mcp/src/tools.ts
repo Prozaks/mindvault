@@ -17,6 +17,7 @@
 import { catalogFilterInputProperties } from "./catalogFilters.js";
 import {
   AGENT_STATUS_OUTPUT_SCHEMA,
+  ATTESTATION_VERIFICATION_OUTPUT_SCHEMA,
   CATALOG_LIST_OUTPUT_SCHEMA,
   CONSISTENCY_OUTPUT_SCHEMA,
   LIST_PROFILES_OUTPUT_SCHEMA,
@@ -522,6 +523,41 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     outputSchema: CONSISTENCY_OUTPUT_SCHEMA as unknown as Record<string, unknown>,
     annotations: {
       title: "Check Consistency",
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+    },
+  },
+  {
+    name: "mindvault_verify_attestation",
+    description:
+      "Verify a resource's verifier attestation hash directly against the vault-registry contract. Pass the attestation hash computed for the content received after purchase; the tool compares it with the value registered on-chain and reports whether verification succeeded.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        resourceId: {
+          type: "string",
+          minLength: 1,
+          maxLength: 24,
+          pattern: "^[a-z0-9]+$",
+          description:
+            "The on-chain resource ID whose registered attestation hash should be checked.",
+          examples: ["cm7x8y9z"],
+        },
+        attestationHash: {
+          type: "string",
+          minLength: 1,
+          maxLength: 64,
+          description:
+            "The attestation hash for the content received, exactly as supplied by the verifier (maximum 64 characters).",
+          examples: ["9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"],
+        },
+      },
+      required: ["resourceId", "attestationHash"],
+    },
+    outputSchema: ATTESTATION_VERIFICATION_OUTPUT_SCHEMA as unknown as Record<string, unknown>,
+    annotations: {
+      title: "Verify Attestation",
       readOnlyHint: true,
       destructiveHint: false,
       idempotentHint: true,

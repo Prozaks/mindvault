@@ -15,17 +15,19 @@ accepts, what a rejection looks like, and which values are normalized.
 
 ## Rules that apply to every tool
 
-| Rule                       | Behavior                                                                                                                               |
-| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| Argument bag               | Must be a JSON object. `null`/omitted is treated as `{}`.                                                                              |
-| Unknown arguments          | **Rejected**, not ignored — a typo is reported instead of silently dropping the value.                                                 |
-| Missing required arguments | Rejected, naming each missing field.                                                                                                   |
-| Strings                    | Trimmed before use; empty (or whitespace-only) is rejected.                                                                            |
-| Booleans ("flags")         | Accept `true`/`false`, `1`/`0`, and the strings `true/false`, `yes/no`, `on/off`, `1/0` (case-insensitive). Anything else is rejected. |
-| Digests                    | Accept the fixed metadata hash format — see [MCP metadata hash format](mcp-metadata-hash.md).                                          |
-| Multiple problems          | Reported together in one error, in schema order.                                                                                       |
-| Determinism                | The same invalid call always produces the same message.                                                                                |
-| Secrets                    | Rejected values are never echoed back — messages describe the field and the expected shape only.                                       |
+| Rule                       | Behavior                                                                                                                                     |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| Argument bag               | Must be a JSON object. `null`/omitted is treated as `{}`.                                                                                    |
+| Unknown arguments          | **Rejected**, not ignored — a typo is reported instead of silently dropping the value.                                                       |
+| Missing required arguments | Rejected, naming each missing field.                                                                                                         |
+| Strings                    | Trimmed before use; empty (or whitespace-only) is rejected.                                                                                  |
+| Booleans ("flags")         | Accept `true`/`false`, `1`/`0`, and the strings `true/false`, `yes/no`, `on/off`, `1/0` (case-insensitive). Anything else is rejected.       |
+| Digests                    | Accept the fixed metadata hash format — see [MCP metadata hash format](mcp-metadata-hash.md).                                                |
+| `attestationHash`          | An opaque verifier-provided string (maximum 64 characters), compared exactly after trimming; it is distinct from the metadata `contentHash`. |
+| On-chain resource ID       | 1–24 lowercase ASCII letters or digits, matching the vault-registry contract.                                                                |
+| Multiple problems          | Reported together in one error, in schema order.                                                                                             |
+| Determinism                | The same invalid call always produces the same message.                                                                                      |
+| Secrets                    | Rejected values are never echoed back — messages describe the field and the expected shape only.                                             |
 
 ---
 
@@ -59,52 +61,54 @@ on the failure rather than parse prose.
 **required on mainnet** unless `MINDVAULT_ALLOW_MAINNET=1` is set on the server
 — see [mainnet guardrails](mainnet-deployment-checklist.md).
 
-| Tool                           | Argument               | Required | Accepted values                                  |
-| ------------------------------ | ---------------------- | -------- | ------------------------------------------------ |
-| `mindvault_setup_wallet`       | `profile`              | no       | letters, digits, dot, dash, underscore (1–64)    |
-| `mindvault_wallet_info`        | —                      | —        | takes no arguments                               |
-| `mindvault_use_profile`        | `name`                 | yes      | letters, digits, dot, dash, underscore (1–64)    |
-| `mindvault_list_profiles`      | —                      | —        | takes no arguments                               |
-| `mindvault_browse`             | —                      | —        | takes no arguments                               |
-| `mindvault_search`             | `query`                | yes      | 1–256 characters                                 |
-|                                | `minPrice`, `maxPrice` | no       | decimal USDC string, e.g. `"5.00"`               |
-|                                | `verificationStatus`   | no       | `pending`, `verified`, `rejected`, `skipped`     |
-|                                | `resourceType`         | no       | `file`, `link`                                   |
-| `mindvault_preview`            | `resourceId`           | yes      | letters, digits, dot, dash, underscore (≤128)    |
-| `mindvault_register`           | `name`                 | yes      | 1–128 characters                                 |
-|                                | `email`                | yes      | email address (≤254)                             |
-|                                | `walletAddress`        | no       | Stellar public key (`G…`, 56 chars)              |
-| `mindvault_publish`            | `title`                | yes      | 1–256 characters                                 |
-|                                | `description`          | no       | ≤2048 characters                                 |
-|                                | `price`                | yes      | decimal USDC string                              |
-|                                | `externalUrl`          | yes      | `http(s)://…` (≤2048)                            |
-| `mindvault_buy`                | `resourceId`           | yes      | resource id                                      |
-|                                | `maxAutoPayUsdc`       | no       | explicit USDC ceiling override for this purchase |
-| `mindvault_register_onchain`   | `resourceId`           | yes      | resource id                                      |
-| `mindvault_update_metadata`    | `resourceId`           | yes      | resource id                                      |
-|                                | `metadata`             | yes      | pointer (ipfs://, ar://, http(s)://, etc. ≤512)  |
-| `mindvault_set_price`          | `resourceId`           | yes      | resource id                                      |
-|                                | `price`                | yes      | decimal USDC amount (e.g. `"10.00"`)             |
-| `mindvault_transfer_ownership` | `resourceId`           | yes      | resource id                                      |
-|                                | `newCreator`           | yes      | Stellar public key (`G…`, 56 chars)              |
-| `mindvault_set_listed`         | `resourceId`           | yes      | resource id                                      |
-|                                | `listed`               | yes      | boolean (`true`/`false`)                         |
-| `mindvault_agent_status`       | —                      | —        | takes no arguments                               |
-| `mindvault_registry_info`      | —                      | —        | takes no arguments                               |
-| `mindvault_network_profile`    | —                      | —        | takes no arguments                               |
-| `mindvault_check_bindings`     | —                      | —        | takes no arguments                               |
-| `mindvault_verify_install`     | —                      | —        | takes no arguments                               |
-| `mindvault_check_consistency`  | `resourceId`           | yes      | resource id                                      |
-|                                | `expectedMetadataHash` | no       | [metadata digest](mcp-metadata-hash.md)          |
-| `mindvault_registry_lookup`    | `resourceId`           | yes      | resource id                                      |
-| `mindvault_registry_list`      | `start`                | no       | integer ≥ 0 (default 0)                          |
-|                                | `limit`                | no       | integer 1–20 (default 20; contract cap)          |
-| `mindvault_tx_status`          | `txHash`               | yes      | sha256 digest (64 hex chars)                     |
-| `mindvault_reset`              | `all`                  | no       | flag — clears every profile                      |
-| `mindvault_backup_state`       | `passphrase`           | yes      | 8–512 characters                                 |
-| `mindvault_restore_state`      | `blob`                 | yes      | backup blob (`v1:…`)                             |
-|                                | `passphrase`           | yes      | 8–512 characters                                 |
-| `mindvault_metrics`            | `reset`                | no       | flag — clears counters after reading             |
+| Tool                           | Argument               | Required | Accepted values                                      |
+| ------------------------------ | ---------------------- | -------- | ---------------------------------------------------- |
+| `mindvault_setup_wallet`       | `profile`              | no       | letters, digits, dot, dash, underscore (1–64)        |
+| `mindvault_wallet_info`        | —                      | —        | takes no arguments                                   |
+| `mindvault_use_profile`        | `name`                 | yes      | letters, digits, dot, dash, underscore (1–64)        |
+| `mindvault_list_profiles`      | —                      | —        | takes no arguments                                   |
+| `mindvault_browse`             | —                      | —        | takes no arguments                                   |
+| `mindvault_search`             | `query`                | yes      | 1–256 characters                                     |
+|                                | `minPrice`, `maxPrice` | no       | decimal USDC string, e.g. `"5.00"`                   |
+|                                | `verificationStatus`   | no       | `pending`, `verified`, `rejected`, `skipped`         |
+|                                | `resourceType`         | no       | `file`, `link`                                       |
+| `mindvault_preview`            | `resourceId`           | yes      | letters, digits, dot, dash, underscore (≤128)        |
+| `mindvault_register`           | `name`                 | yes      | 1–128 characters                                     |
+|                                | `email`                | yes      | email address (≤254)                                 |
+|                                | `walletAddress`        | no       | Stellar public key (`G…`, 56 chars)                  |
+| `mindvault_publish`            | `title`                | yes      | 1–256 characters                                     |
+|                                | `description`          | no       | ≤2048 characters                                     |
+|                                | `price`                | yes      | decimal USDC string                                  |
+|                                | `externalUrl`          | yes      | `http(s)://…` (≤2048)                                |
+| `mindvault_buy`                | `resourceId`           | yes      | resource id                                          |
+|                                | `maxAutoPayUsdc`       | no       | explicit USDC ceiling override for this purchase     |
+| `mindvault_register_onchain`   | `resourceId`           | yes      | resource id                                          |
+| `mindvault_update_metadata`    | `resourceId`           | yes      | resource id                                          |
+|                                | `metadata`             | yes      | pointer (ipfs://, ar://, http(s)://, etc. ≤512)      |
+| `mindvault_set_price`          | `resourceId`           | yes      | resource id                                          |
+|                                | `price`                | yes      | decimal USDC amount (e.g. `"10.00"`)                 |
+| `mindvault_transfer_ownership` | `resourceId`           | yes      | resource id                                          |
+|                                | `newCreator`           | yes      | Stellar public key (`G…`, 56 chars)                  |
+| `mindvault_set_listed`         | `resourceId`           | yes      | resource id                                          |
+|                                | `listed`               | yes      | boolean (`true`/`false`)                             |
+| `mindvault_agent_status`       | —                      | —        | takes no arguments                                   |
+| `mindvault_registry_info`      | —                      | —        | takes no arguments                                   |
+| `mindvault_network_profile`    | —                      | —        | takes no arguments                                   |
+| `mindvault_check_bindings`     | —                      | —        | takes no arguments                                   |
+| `mindvault_verify_install`     | —                      | —        | takes no arguments                                   |
+| `mindvault_check_consistency`  | `resourceId`           | yes      | resource id                                          |
+|                                | `expectedMetadataHash` | no       | [metadata digest](mcp-metadata-hash.md)              |
+| `mindvault_verify_attestation` | `resourceId`           | yes      | on-chain resource id (1–24 lowercase letters/digits) |
+|                                | `attestationHash`      | yes      | verifier attestation hash (≤64 characters)           |
+| `mindvault_registry_lookup`    | `resourceId`           | yes      | resource id                                          |
+| `mindvault_registry_list`      | `start`                | no       | integer ≥ 0 (default 0)                              |
+|                                | `limit`                | no       | integer 1–20 (default 20; contract cap)              |
+| `mindvault_tx_status`          | `txHash`               | yes      | sha256 digest (64 hex chars)                         |
+| `mindvault_reset`              | `all`                  | no       | flag — clears every profile                          |
+| `mindvault_backup_state`       | `passphrase`           | yes      | 8–512 characters                                     |
+| `mindvault_restore_state`      | `blob`                 | yes      | backup blob (`v1:…`)                                 |
+|                                | `passphrase`           | yes      | 8–512 characters                                     |
+| `mindvault_metrics`            | `reset`                | no       | flag — clears counters after reading                 |
 
 ### Why resource ids are restricted
 
@@ -126,6 +130,7 @@ accepted spelling the agent used:
 | flag                   | coerced to a real boolean     |
 | `txHash`               | lowercased bare hex           |
 | `expectedMetadataHash` | canonical `sha256:<hex>` form |
+| `attestationHash`      | trimmed and compared exactly  |
 
 ---
 

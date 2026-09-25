@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
+const getAttestationHashMock = vi.hoisted(() => vi.fn());
+
 vi.mock("@modelcontextprotocol/sdk/server/index.js", () => ({
   Server: class MockServer {
     setRequestHandler = vi.fn();
@@ -37,6 +39,7 @@ vi.mock("@mindvault/registry-client", async (importOriginal) => {
   const actual = (await importOriginal()) as any;
   return {
     ...actual,
+    getAttestationHash: getAttestationHashMock,
     networks: {
       ...actual.networks,
       testnet: {
@@ -55,6 +58,7 @@ import {
   preview,
   publishStatus,
   txStatus,
+  verifyAttestation,
   buy,
   registerOnchain,
   walletInfo,
@@ -1804,6 +1808,71 @@ describe("dispatchTool argument validation", () => {
     const second = await dispatchTool("mindvault_tx_status", { txHash: "nope" }).catch((e) => e);
     expect(first.message).toBe(second.message);
     expect(first.message).toContain("hexadecimal");
+  });
+});
+
+describe("verifyAttestation", () => {
+  afterEach(() => {
+    delete process.env.MINDVAULT_MOCK;
+    getAttestationHashMock.mockReset();
+  });
+
+  it("reads the registered hash through the registry client", async () => {
+    getAttestationHashMock.mockResolvedValue("mock-attestation-1");
+    const parsed = JSON.parse(await verifyAttestation("mock1", "mock-attestation-1"));
+    expect(parsed.matches).toBe(true);
+    expect(getAttestationHashMock).toHaveBeenCalledWith(
+      expect.objectContaining({ resourceId: "mock1" }),
+    );
+  });
+
+  it("maps a deployed contract without the getter to a contract error", async () => {
+    getAttestationHashMock.mockRejectedValue(
+      new Error("The deployed vault-registry contract does not expose get_attestation_hash."),
+    );
+    const error = await verifyAttestation("mock1", "mock-attestation-1").catch((err) => err);
+    expect(error.message).toContain("Category: contract");
+    expect(error.message).toContain("mindvault_check_bindings");
+  });
+
+  it("reports a matching mock attestation", async () => {
+    process.env.MINDVAULT_MOCK = "1";
+    const parsed = JSON.parse(await verifyAttestation("mock1", "mock-attestation-1"));
+    expect(parsed.matches).toBe(true);
+    expect(parsed.verified).toBe(true);
+    expect(parsed.registeredAttestationHash).toBe("mock-attestation-1");
+  });
+
+  it("reports a mismatch without treating it as a transport failure", async () => {
+    process.env.MINDVAULT_MOCK = "1";
+    const parsed = JSON.parse(await verifyAttestation("mock1", "different"));
+    expect(parsed.matches).toBe(false);
+    expect(parsed.verified).toBe(false);
+    expect(parsed.summary).toContain("does not match");
+  });
+
+  it("reports when no attestation is registered", async () => {
+    process.env.MINDVAULT_MOCK = "1";
+    const parsed = JSON.parse(await verifyAttestation("mock2", "different"));
+    expect(parsed.registeredAttestationHash).toBeNull();
+    expect(parsed.matches).toBe(false);
+    expect(parsed.summary).toContain("No attestation hash");
+  });
+
+  it("dispatches through the MCP tool name", async () => {
+    process.env.MINDVAULT_MOCK = "1";
+    const result = await dispatchTool("mindvault_verify_attestation", {
+      resourceId: "mock1",
+      attestationHash: "mock-attestation-1",
+    });
+    expect(result).toContain('"verified": true');
+  });
+
+  it("rejects an attestation hash longer than the contract limit", async () => {
+    process.env.MINDVAULT_MOCK = "1";
+    await expect(verifyAttestation("mock1", "a".repeat(65))).rejects.toThrow(
+      "at most 64 characters",
+    );
   });
 });
 

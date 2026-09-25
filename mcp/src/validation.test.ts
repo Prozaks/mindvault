@@ -58,6 +58,10 @@ const VALID_CALLS: Record<string, Record<string, unknown>> = {
   mindvault_network_profile: {},
   mindvault_check_bindings: {},
   mindvault_check_consistency: { resourceId: "res-001" },
+  mindvault_verify_attestation: {
+    resourceId: "res001",
+    attestationHash: "a".repeat(64),
+  },
   mindvault_registry_lookup: { resourceId: "res-001" },
   mindvault_registry_list: {},
   mindvault_tx_status: { txHash: VALID_SHA256 },
@@ -245,6 +249,20 @@ describe("string arguments", () => {
         "pattern_mismatch",
       );
     }
+  });
+
+  it("enforces the on-chain resource id and attestation hash limits", () => {
+    const invalidId = expectInvalid("mindvault_verify_attestation", {
+      resourceId: "res-001",
+      attestationHash: "a".repeat(64),
+    });
+    expect(invalidId.issues[0].code).toBe("pattern_mismatch");
+
+    const oversizedHash = expectInvalid("mindvault_verify_attestation", {
+      resourceId: "res001",
+      attestationHash: "a".repeat(65),
+    });
+    expect(oversizedHash.issues[0].code).toBe("too_long");
   });
 
   it("rejects a malformed email and accepts a valid one", () => {

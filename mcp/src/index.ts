@@ -7,6 +7,7 @@
 import {
   checkContractBindings,
   createRegistryClient,
+  getAttestationHash,
   Errors as RegistryErrors,
   listResources,
   type Resource,
@@ -56,6 +57,7 @@ import {
   mockSetPrice,
   mockTransferOwnership,
   mockSetListed,
+  mockVerifyAttestation,
 } from "./mock.js";
 import { purchaseHistoryTool, recordPurchase } from "./purchaseHistory.js";
 import { Mutex } from "./mutex.js";
@@ -2404,6 +2406,72 @@ export async function checkConsistency(
   return JSON.stringify({ ...report, summary }, null, 2);
 }
 
+export async function verifyAttestation(
+  resourceId: string,
+  attestationHash: string,
+): Promise<string> {
+  const expected = attestationHash.trim();
+  if (!resourceId) throw new Error("resourceId is required.");
+  if (!expected) throw new Error("attestationHash is required.");
+  if (expected.length > 64) throw new Error("attestationHash must be at most 64 characters.");
+
+  if (_isMock()) return mockVerifyAttestation(resourceId, expected, REGISTRY_CONTRACT_ID);
+
+  let registeredAttestationHash: string | null;
+  try {
+    registeredAttestationHash = await getAttestationHash({
+      contractId: REGISTRY_CONTRACT_ID,
+      rpcUrl: SOROBAN_RPC_URL,
+      networkPassphrase: REGISTRY_NETWORK_PASSPHRASE,
+      resourceId,
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (/does not expose get_attestation_hash/.test(message)) {
+      const mapped = mapRegistryError({
+        operation: `Attestation verification failed for resource "${resourceId}"`,
+        message,
+      });
+      throw mcpError({
+        ...mapped,
+        action:
+          "Run mindvault_check_bindings. If get_attestation_hash is missing, point VAULT_REGISTRY_CONTRACT_ID at a deployment that includes it.",
+      });
+    }
+    throw mcpError(
+      mapTransportError({
+        operation: `On-chain attestation lookup failed for resource "${resourceId}" (contract ${REGISTRY_CONTRACT_ID}, RPC ${SOROBAN_RPC_URL})`,
+        source: "soroban",
+        error: err,
+      }),
+    );
+  }
+
+  const matches = registeredAttestationHash !== null && registeredAttestationHash === expected;
+  const summary = matches
+    ? "Attestation hash matches the value registered on-chain."
+    : registeredAttestationHash === null
+      ? "No attestation hash is registered for this resource; it may be missing or have no verifier attestation."
+      : "The supplied attestation hash does not match the value registered on-chain.";
+
+  return JSON.stringify(
+    {
+      source: "on-chain",
+      resourceId,
+      expectedAttestationHash: expected,
+      registeredAttestationHash,
+      matches,
+      verified: matches,
+      summary,
+      contract: REGISTRY_CONTRACT_ID,
+      network: REGISTRY_NETWORK_PASSPHRASE,
+      rpc: SOROBAN_RPC_URL,
+    },
+    null,
+    2,
+  );
+}
+
 /**
  * Report the current Stellar and x402 network configuration in use by this MCP
  * instance. Includes testnet/mainnet selection, RPC/Horizon URLs, registry and
@@ -2631,6 +2699,11 @@ async function dispatchToolOutcome(
         return checkConsistency(
           requiredString(args, "resourceId"),
           optionalString(args, "expectedMetadataHash"),
+        );
+      case "mindvault_verify_attestation":
+        return verifyAttestation(
+          requiredString(args, "resourceId"),
+          requiredString(args, "attestationHash"),
         );
       case "mindvault_registry_lookup":
         return registryLookup(requiredString(args, "resourceId"));

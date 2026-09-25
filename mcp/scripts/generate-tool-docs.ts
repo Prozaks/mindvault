@@ -67,6 +67,7 @@ function groupOf(name: string): string {
       "mindvault_registry_list",
       "mindvault_registry_health",
       "mindvault_check_consistency",
+      "mindvault_verify_attestation",
       "mindvault_check_bindings",
       "mindvault_tx_status",
     ].includes(name)
