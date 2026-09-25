@@ -133,6 +133,37 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     },
   },
   {
+    name: "mindvault_repair_sponsored_account",
+    description:
+      "Repair a half-created sponsored account. Derives the address from a recovered secret key, re-fetches its Horizon balances, and restores the wallet to a local profile only when the on-chain account exists. The secret is never returned.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        secretKey: {
+          type: "string",
+          description: "The recovered Stellar secret key returned during the interrupted setup.",
+        },
+        profile: {
+          type: "string",
+          description: "Optional profile to repair; defaults to the active profile.",
+          examples: ["default", "publisher"],
+        },
+        confirmMainnet: {
+          type: "boolean",
+          description:
+            "Required on mainnet (or set MINDVAULT_ALLOW_MAINNET=1). Explicitly confirm restoring credentials for the public Stellar network.",
+        },
+      },
+      required: ["secretKey"],
+    },
+    annotations: {
+      title: "Repair Sponsored Account",
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+    },
+  },
+  {
     name: "mindvault_use_profile",
     description:
       "Switch the active wallet profile, creating it if it does not exist. Profiles let one agent keep separate identities (e.g. testnet vs mainnet, publisher vs buyer); each has its own wallet and publisher API key. Subsequent tools operate on the active profile.",
@@ -404,6 +435,13 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
           description: `Max receipts to export, newest first (1–${RECEIPT_EXPORT_MAX_LIMIT}).`,
           examples: [50, 100],
         },
+        groupBy: {
+          type: "string",
+          enum: ["month"],
+          description:
+            'Optional grouping. Use "month" to include per-month receipt counts and USDC totals (UTC) in monthlySummaries.',
+          examples: ["month"],
+        },
       },
       required: [],
     },
@@ -467,6 +505,43 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     annotations: {
       title: "Registry Info",
       readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+    },
+  },
+  {
+    name: "mindvault_terms",
+    description:
+      'Get or set the active publisher wallet\'s on-chain licensing terms hash. Use operation "get" with a creator address to inspect terms, or "set" with termsHash to bind the active creator identity to a terms document digest.',
+    inputSchema: {
+      type: "object",
+      properties: {
+        operation: {
+          type: "string",
+          enum: ["get", "set"],
+          description: "Whether to read or update the creator terms hash.",
+        },
+        creator: {
+          type: "string",
+          description:
+            "Creator Stellar address to inspect. Optional for get when a wallet is active; set always uses the active wallet.",
+        },
+        termsHash: {
+          type: "string",
+          description:
+            "Terms document hash or content-addressed digest to store (maximum 64 bytes). Required for set.",
+          examples: ["sha256:0123456789abcdef"],
+        },
+        confirmMainnet: {
+          type: "boolean",
+          description: "Required for set on mainnet (or set MINDVAULT_ALLOW_MAINNET=1).",
+        },
+      },
+      required: ["operation"],
+    },
+    annotations: {
+      title: "Publisher Terms",
+      readOnlyHint: false,
       destructiveHint: false,
       idempotentHint: true,
     },
@@ -1058,7 +1133,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     // was invisible to the generated docs and the schema snapshots (#596).
     name: "mindvault_purchase_history",
     description:
-      "List locally persisted purchase receipts from successful mindvault_buy calls (~/.mindvault/purchases.json). Read-only. Optional filters: resourceId and network (exact match, e.g. stellar:testnet). Returns count + purchases (newest first), or an empty list when nothing matches.",
+      "List locally persisted purchase receipts from successful mindvault_buy calls (~/.mindvault/purchases.json). Read-only. Filter by resourceId and network (exact match), or search resource ids and titles with a case-insensitive query. Filters can be combined. Returns newest first.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1072,6 +1147,12 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
           description:
             "Optional. Only return receipts recorded on this x402 network id. Example: 'stellar:testnet'",
           examples: ["stellar:testnet", "stellar:pubnet"],
+        },
+        query: {
+          type: "string",
+          description:
+            "Optional case-insensitive text search across receipt resource ids and titles.",
+          examples: ["stellar", "res-001"],
         },
       },
       required: [],

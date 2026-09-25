@@ -15,6 +15,7 @@
 /** Tools that mutate state or spend funds — gated on mainnet. */
 export const MAINNET_GATED_TOOLS = [
   "mindvault_setup_wallet",
+  "mindvault_repair_sponsored_account",
   "mindvault_register",
   "mindvault_publish",
   "mindvault_buy",
@@ -24,6 +25,7 @@ export const MAINNET_GATED_TOOLS = [
   "mindvault_set_price",
   "mindvault_transfer_ownership",
   "mindvault_set_listed",
+  "mindvault_terms",
 ] as const;
 
 export type MainnetGatedTool = (typeof MAINNET_GATED_TOOLS)[number];

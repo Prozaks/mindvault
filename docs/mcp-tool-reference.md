@@ -15,7 +15,7 @@ For structured JSON results (`structuredContent` + `outputSchema`) see
 For client installation and configuration see
 [mcp-client-configs.md](mcp-client-configs.md).
 
-**37 tools** as of last generation.
+**39 tools** as of last generation.
 
 ---
 
@@ -79,7 +79,7 @@ For client installation and configuration see
 | Tool                         | Description                                                                                                                                                                                                                                                                                              | Structured |
 | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
 | `mindvault_export_receipts`  | Export receipts for resources this agent has purchased as a schema-versioned document (JSON, or RFC 4180 CSV in the envelope's csv field). Filter by resource, network, and date range. Reports a row count and the summed USDC total, so an agent can reconcile spend without re-reading each purchase. | yes        |
-| `mindvault_purchase_history` | List locally persisted purchase receipts from successful mindvault_buy calls (~/.mindvault/purchases.json). Read-only. Optional filters: resourceId and network (exact match, e.g. stellar:testnet). Returns count + purchases (newest first), or an empty list when nothing matches.                    | yes        |
+| `mindvault_purchase_history` | List locally persisted purchase receipts from successful mindvault_buy calls (~/.mindvault/purchases.json). Read-only. Filter by resourceId and network (exact match), or search resource ids and titles with a case-insensitive query. Filters can be combined. Returns newest first.                   | yes        |
 
 ## State Management
 
@@ -102,10 +102,12 @@ For client installation and configuration see
 
 ## Other
 
-| Tool                              | Description                                                                                                                                                                 | Structured |
-| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
-| `mindvault_recover_catalog_cache` | Attempt a catalog stale-cache recovery: requests the MCP to refresh or re-fetch catalog index data and provides recovery guidance. Useful when browse results appear stale. | yes        |
+| Tool                                 | Description                                                                                                                                                                                                                                | Structured |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------- |
+| `mindvault_repair_sponsored_account` | Repair a half-created sponsored account. Derives the address from a recovered secret key, re-fetches its Horizon balances, and restores the wallet to a local profile only when the on-chain account exists. The secret is never returned. | text only  |
+| `mindvault_terms`                    | Get or set the active publisher wallet's on-chain licensing terms hash. Use operation "get" with a creator address to inspect terms, or "set" with termsHash to bind the active creator identity to a terms document digest.               | text only  |
+| `mindvault_recover_catalog_cache`    | Attempt a catalog stale-cache recovery: requests the MCP to refresh or re-fetch catalog index data and provides recovery guidance. Useful when browse results appear stale.                                                                | yes        |
 
 ---
 
-_This file was generated from `mcp/src/tools.ts` — 37 tools._
+_This file was generated from `mcp/src/tools.ts` — 39 tools._

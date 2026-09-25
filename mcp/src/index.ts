@@ -1045,6 +1045,40 @@ async function setupWallet(profileArg?: string): Promise<ToolOutcome> {
   };
 }
 
+async function repairSponsoredAccount(secretKey: string, profileArg?: string): Promise<string> {
+  const target = resolveProfileName(profileArg);
+  const { Keypair } = await import("@stellar/stellar-sdk");
+  const publicKey = Keypair.fromSecret(secretKey).publicKey();
+  const details = await getBalanceDetails(publicKey);
+
+  if (details.status === "missing") {
+    throw new Error(
+      `Sponsored-account repair stopped: ${publicKey} does not exist on the configured Stellar network. Retry mindvault_setup_wallet; no local key was changed.`,
+    );
+  }
+
+  activeProfileName = target;
+  activeProfile().wallet = { publicKey, secretKey };
+  saveState();
+  return JSON.stringify(
+    {
+      status: "repaired",
+      profile: target,
+      address: publicKey,
+      accountStatus: details.status,
+      xlmBalance: details.xlmBalance,
+      usdcBalance: details.usdcBalance,
+      persisted: true,
+      message:
+        details.status === "no-trustline"
+          ? "Wallet key restored, but the sponsored account still needs a USDC trustline."
+          : "Wallet key restored after confirming the sponsored account on Horizon.",
+    },
+    null,
+    2,
+  );
+}
+
 async function walletInfoOutcome(): Promise<ToolOutcome> {
   const wallet = requireWallet();
   const details = await getBalanceDetails(wallet.publicKey);
@@ -2082,6 +2116,117 @@ export async function setListed(resourceId: string, listed: boolean): Promise<st
   );
 }
 
+export async function publisherTerms(
+  operation: string,
+  creatorArg?: string,
+  termsHash?: string,
+  confirmMainnet = false,
+): Promise<string> {
+  const wallet = currentWallet();
+  const creator = creatorArg ?? wallet?.publicKey;
+  if (!creator) {
+    throw new Error('creator is required for operation "get" when no wallet is active.');
+  }
+
+  if (operation === "get") {
+    const client = createRegistryClient({
+      contractId: REGISTRY_CONTRACT_ID,
+      rpcUrl: SOROBAN_RPC_URL,
+      networkPassphrase: REGISTRY_NETWORK_PASSPHRASE,
+    });
+    let tx: Awaited<ReturnType<typeof client.get_terms_hash>>;
+    try {
+      tx = await client.get_terms_hash({ creator });
+    } catch (err: any) {
+      throw mcpError(
+        mapTransportError({
+          operation: `Get terms hash failed for creator "${creator}"`,
+          source: "soroban",
+          error: err,
+        }),
+      );
+    }
+    if (tx.result.isErr()) {
+      throw mcpError(
+        mapRegistryError({
+          operation: `Get terms hash failed for creator "${creator}"`,
+          message: tx.result.unwrapErr().message,
+        }),
+      );
+    }
+    return JSON.stringify(
+      { operation: "get", creator, termsHash: tx.result.unwrap(), contract: REGISTRY_CONTRACT_ID },
+      null,
+      2,
+    );
+  }
+
+  if (operation !== "set") throw new Error('operation must be "get" or "set".');
+  assertMainnetMutationAllowed(NETWORK, "mindvault_terms", { confirmMainnet });
+  if (!wallet) throw new Error("Set terms requires an active wallet. Run mindvault_setup_wallet.");
+  if (creatorArg && creatorArg !== wallet.publicKey) {
+    throw new Error("Set terms creator must match the active wallet address.");
+  }
+  if (!termsHash?.trim()) throw new Error('termsHash is required for operation "set".');
+
+  const client = createRegistryClient({
+    contractId: REGISTRY_CONTRACT_ID,
+    rpcUrl: SOROBAN_RPC_URL,
+    networkPassphrase: REGISTRY_NETWORK_PASSPHRASE,
+    publicKey: wallet.publicKey,
+  });
+  let tx: Awaited<ReturnType<typeof client.set_terms_hash>>;
+  try {
+    tx = await client.set_terms_hash({ creator: wallet.publicKey, terms_hash: termsHash.trim() });
+  } catch (err: any) {
+    throw mcpError(
+      mapRegistryError({
+        operation: `Set terms hash failed for creator "${wallet.publicKey}"`,
+        message: err?.message || String(err),
+      }),
+    );
+  }
+  if (tx.result.isErr()) {
+    throw mcpError(
+      mapRegistryError({
+        operation: `Set terms hash failed for creator "${wallet.publicKey}"`,
+        message: tx.result.unwrapErr().message,
+      }),
+    );
+  }
+
+  const { Keypair, Transaction } = await import("@stellar/stellar-sdk");
+  const keypair = Keypair.fromSecret(wallet.secretKey);
+  let sentTx;
+  try {
+    sentTx = await tx.signAndSend({
+      signTransaction: async (xdr: string) => {
+        const stellarTx = new Transaction(xdr, REGISTRY_NETWORK_PASSPHRASE);
+        stellarTx.sign(keypair);
+        return { signedTxXdr: stellarTx.toXDR() };
+      },
+    });
+  } catch (err: any) {
+    throw mcpError(
+      mapRegistryError({
+        operation: `Set terms hash submission failed for creator "${wallet.publicKey}"`,
+        message: err?.message || String(err),
+      }),
+    );
+  }
+  return JSON.stringify(
+    {
+      operation: "set",
+      creator: wallet.publicKey,
+      termsHash: termsHash.trim(),
+      txHash: sentTx?.sendTransactionResponse?.hash ?? null,
+      contract: REGISTRY_CONTRACT_ID,
+    },
+    null,
+    2,
+  );
+}
+
 export async function registryLookup(resourceId: string): Promise<string> {
   if (_isMock())
     return mockRegistryLookup(resourceId, REGISTRY_CONTRACT_ID, currentWallet()?.publicKey);
@@ -2506,6 +2651,7 @@ function isDispatchableTool(name: string): boolean {
 
 const STATE_MUTATING_TOOLS = new Set([
   "mindvault_setup_wallet",
+  "mindvault_repair_sponsored_account",
   "mindvault_use_profile",
   "mindvault_register",
   "mindvault_publish",
@@ -2515,6 +2661,7 @@ const STATE_MUTATING_TOOLS = new Set([
   "mindvault_set_price",
   "mindvault_transfer_ownership",
   "mindvault_set_listed",
+  "mindvault_terms",
   "mindvault_set_tags",
   "mindvault_reset",
   "mindvault_restore_state",
@@ -2552,7 +2699,9 @@ async function dispatchToolOutcome(
     name in TOOL_ARGUMENT_SPECS && !isDryRunCall ? validateToolArgs(name, rawArgs) : {};
   const dryRunArgs = isDryRunCall ? (rawRecord as ValidatedArgs) : args;
 
-  assertMainnetMutationAllowed(NETWORK, name, rawRecord);
+  if (!(name === "mindvault_terms" && rawRecord.operation === "get")) {
+    assertMainnetMutationAllowed(NETWORK, name, rawRecord);
+  }
 
   // Network-independent spend confirmation (#594). Distinct from the mainnet
   // guardrail above (which only fires on pubnet) and from the auto-pay ceiling
@@ -2573,6 +2722,11 @@ async function dispatchToolOutcome(
     switch (name) {
       case "mindvault_setup_wallet":
         return setupWallet(optionalString(args, "profile"));
+      case "mindvault_repair_sponsored_account":
+        return repairSponsoredAccount(
+          requiredString(args, "secretKey"),
+          optionalString(args, "profile"),
+        );
       case "mindvault_wallet_info":
         return walletInfoOutcome();
       case "mindvault_use_profile":
@@ -2623,6 +2777,13 @@ async function dispatchToolOutcome(
         return agentStatus();
       case "mindvault_registry_info":
         return registryInfo();
+      case "mindvault_terms":
+        return publisherTerms(
+          requiredString(args, "operation"),
+          optionalString(args, "creator"),
+          optionalString(args, "termsHash"),
+          flag(args, "confirmMainnet"),
+        );
       case "mindvault_network_profile":
         return networkProfile();
       case "mindvault_check_bindings":

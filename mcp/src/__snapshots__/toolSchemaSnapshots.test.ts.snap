@@ -523,6 +523,16 @@ exports[`tool schema snapshots > mindvault_export_receipts > input schema 1`] = 
       ],
       "type": "string",
     },
+    "groupBy": {
+      "description": "Optional grouping. Use "month" to include per-month receipt counts and USDC totals (UTC) in monthlySummaries.",
+      "enum": [
+        "month",
+      ],
+      "examples": [
+        "month",
+      ],
+      "type": "string",
+    },
     "limit": {
       "description": "Max receipts to export, newest first (1–500).",
       "examples": [
@@ -589,6 +599,16 @@ exports[`tool schema snapshots > mindvault_export_receipts > output schema 1`] =
     "filters": {
       "description": "The filters this export was produced with; null where unset.",
       "properties": {
+        "groupBy": {
+          "enum": [
+            "month",
+            null,
+          ],
+          "type": [
+            "string",
+            "null",
+          ],
+        },
         "limit": {
           "type": [
             "integer",
@@ -626,6 +646,7 @@ exports[`tool schema snapshots > mindvault_export_receipts > output schema 1`] =
         "since",
         "until",
         "limit",
+        "groupBy",
       ],
       "type": "object",
     },
@@ -639,6 +660,35 @@ exports[`tool schema snapshots > mindvault_export_receipts > output schema 1`] =
     "generatedAt": {
       "description": "ISO-8601 instant the export was produced.",
       "type": "string",
+    },
+    "monthlySummaries": {
+      "description": "UTC monthly totals, present only when groupBy is "month".",
+      "items": {
+        "properties": {
+          "count": {
+            "type": "integer",
+          },
+          "currency": {
+            "const": "USDC",
+            "type": "string",
+          },
+          "month": {
+            "pattern": "^[0-9]{4}-[0-9]{2}$",
+            "type": "string",
+          },
+          "totalAmount": {
+            "type": "string",
+          },
+        },
+        "required": [
+          "month",
+          "count",
+          "totalAmount",
+          "currency",
+        ],
+        "type": "object",
+      },
+      "type": "array",
     },
     "receipts": {
       "items": {
@@ -1338,6 +1388,14 @@ exports[`tool schema snapshots > mindvault_purchase_history > input schema 1`] =
       ],
       "type": "string",
     },
+    "query": {
+      "description": "Optional case-insensitive text search across receipt resource ids and titles.",
+      "examples": [
+        "stellar",
+        "res-001",
+      ],
+      "type": "string",
+    },
     "resourceId": {
       "description": "Optional. Only return receipts for this resource id. Example: 'cm7x8y9z'",
       "examples": [
@@ -1800,6 +1858,44 @@ exports[`tool schema snapshots > mindvault_registry_lookup > output schema 1`] =
   "type": "object",
 }
 `;
+
+exports[`tool schema snapshots > mindvault_repair_sponsored_account > annotations 1`] = `
+{
+  "destructiveHint": false,
+  "idempotentHint": true,
+  "readOnlyHint": false,
+  "title": "Repair Sponsored Account",
+}
+`;
+
+exports[`tool schema snapshots > mindvault_repair_sponsored_account > input schema 1`] = `
+{
+  "properties": {
+    "confirmMainnet": {
+      "description": "Required on mainnet (or set MINDVAULT_ALLOW_MAINNET=1). Explicitly confirm restoring credentials for the public Stellar network.",
+      "type": "boolean",
+    },
+    "profile": {
+      "description": "Optional profile to repair; defaults to the active profile.",
+      "examples": [
+        "default",
+        "publisher",
+      ],
+      "type": "string",
+    },
+    "secretKey": {
+      "description": "The recovered Stellar secret key returned during the interrupted setup.",
+      "type": "string",
+    },
+  },
+  "required": [
+    "secretKey",
+  ],
+  "type": "object",
+}
+`;
+
+exports[`tool schema snapshots > mindvault_repair_sponsored_account > output schema 1`] = `null`;
 
 exports[`tool schema snapshots > mindvault_reset > annotations 1`] = `
 {
@@ -2476,6 +2572,51 @@ exports[`tool schema snapshots > mindvault_setup_wallet > output schema 1`] = `
 }
 `;
 
+exports[`tool schema snapshots > mindvault_terms > annotations 1`] = `
+{
+  "destructiveHint": false,
+  "idempotentHint": true,
+  "readOnlyHint": false,
+  "title": "Publisher Terms",
+}
+`;
+
+exports[`tool schema snapshots > mindvault_terms > input schema 1`] = `
+{
+  "properties": {
+    "confirmMainnet": {
+      "description": "Required for set on mainnet (or set MINDVAULT_ALLOW_MAINNET=1).",
+      "type": "boolean",
+    },
+    "creator": {
+      "description": "Creator Stellar address to inspect. Optional for get when a wallet is active; set always uses the active wallet.",
+      "type": "string",
+    },
+    "operation": {
+      "description": "Whether to read or update the creator terms hash.",
+      "enum": [
+        "get",
+        "set",
+      ],
+      "type": "string",
+    },
+    "termsHash": {
+      "description": "Terms document hash or content-addressed digest to store. Required for set.",
+      "examples": [
+        "sha256:0123456789abcdef",
+      ],
+      "type": "string",
+    },
+  },
+  "required": [
+    "operation",
+  ],
+  "type": "object",
+}
+`;
+
+exports[`tool schema snapshots > mindvault_terms > output schema 1`] = `null`;
+
 exports[`tool schema snapshots > mindvault_transfer_ownership > annotations 1`] = `
 {
   "destructiveHint": false,
@@ -2994,6 +3135,7 @@ exports[`tool schema snapshots > the covered tool names are pinned 1`] = `
   "mindvault_registry_info",
   "mindvault_registry_list",
   "mindvault_registry_lookup",
+  "mindvault_repair_sponsored_account",
   "mindvault_reset",
   "mindvault_restore_state",
   "mindvault_rotate_publisher_key",
@@ -3002,6 +3144,7 @@ exports[`tool schema snapshots > the covered tool names are pinned 1`] = `
   "mindvault_set_price",
   "mindvault_set_tags",
   "mindvault_setup_wallet",
+  "mindvault_terms",
   "mindvault_transfer_ownership",
   "mindvault_tx_status",
   "mindvault_update_metadata",

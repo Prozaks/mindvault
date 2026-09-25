@@ -185,6 +185,13 @@ const SAMPLE_OVERRIDES: Record<string, Record<string, unknown>> = {
   mindvault_import_wallet: {
     secretKey: "SAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
   },
+  mindvault_repair_sponsored_account: {
+    secretKey: "SAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+  },
+  mindvault_terms: {
+    operation: "get",
+    creator: "GA6HCMBLTZS5VYYBCATRBRZ3BZJMAFUDKYYF6AH6MVCMGWMRDNSWJPIH",
+  },
 };
 
 /** A value satisfying one advertised JSON Schema property. */

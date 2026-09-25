@@ -62,6 +62,14 @@ describe("normalizeReceiptExportOptions", () => {
     ).toEqual({ format: "csv", resourceId: "res-001", network: "x" });
   });
 
+  it("accepts monthly grouping and rejects unknown groupings", () => {
+    expect(normalizeReceiptExportOptions({ groupBy: "month" })).toEqual({
+      format: "json",
+      groupBy: "month",
+    });
+    expect(() => normalizeReceiptExportOptions({ groupBy: "week" })).toThrow(/groupBy/);
+  });
+
   it("reads a bare date as midnight UTC", () => {
     const options = normalizeReceiptExportOptions({ since: "2026-08-01" });
     expect(options.since).toBe("2026-08-01T00:00:00.000Z");
@@ -186,8 +194,28 @@ describe("buildReceiptExport", () => {
       since: null,
       until: null,
       limit: null,
+      groupBy: null,
     });
     expect(result.csv).toBeUndefined();
+  });
+
+  it("includes exact per-month totals newest-first when requested", () => {
+    const receipts = [
+      storedReceipt({ amount: "0.1", timestamp: "2026-07-31T23:00:00.000Z" }),
+      storedReceipt({ amount: "0.2", timestamp: "2026-08-01T00:00:00.000Z" }),
+      storedReceipt({ amount: "1.3", timestamp: "2026-08-20T00:00:00.000Z" }),
+    ];
+    const result = buildReceiptExport(
+      receipts,
+      { format: "json", groupBy: "month" },
+      NOW,
+      "testnet",
+    );
+    expect(result.monthlySummaries).toEqual([
+      { month: "2026-08", count: 2, totalAmount: "1.5", currency: "USDC" },
+      { month: "2026-07", count: 1, totalAmount: "0.1", currency: "USDC" },
+    ]);
+    expect(result.filters.groupBy).toBe("month");
   });
 
   it("includes the csv document only for the csv format", () => {

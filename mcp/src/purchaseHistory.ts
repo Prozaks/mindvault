@@ -49,6 +49,8 @@ export const UNSCOPED_PROFILE = "(unscoped)";
 export interface PurchaseHistoryFilter {
   resourceId?: string;
   network?: string;
+  /** Case-insensitive free-text match against resource id or title. */
+  query?: string;
   /**
    * Wallet profile to scope to (#584). Pass {@link UNSCOPED_PROFILE} to find
    * receipts recorded before profiles were tracked.
@@ -199,6 +201,16 @@ export function normalizePurchaseHistoryFilter(
     }
   }
 
+  if (args.query !== undefined && args.query !== null && args.query !== "") {
+    if (typeof args.query !== "string") {
+      throw new PurchaseHistoryError("Invalid query filter: expected a string.");
+    }
+    filter.query = args.query.trim();
+    if (!filter.query) {
+      throw new PurchaseHistoryError("Invalid query filter: expected a non-empty string.");
+    }
+  }
+
   return filter;
 }
 
@@ -212,6 +224,15 @@ export function listPurchases(filter: PurchaseHistoryFilter = {}): PurchaseRecei
     if (filter.resourceId && p.resourceId !== filter.resourceId) return false;
     if (filter.network && p.network !== filter.network) return false;
     if (filter.profile && profileOf(p) !== filter.profile) return false;
+    if (filter.query) {
+      const query = filter.query.toLocaleLowerCase();
+      if (
+        !p.resourceId.toLocaleLowerCase().includes(query) &&
+        !(p.title ?? "").toLocaleLowerCase().includes(query)
+      ) {
+        return false;
+      }
+    }
     return true;
   });
   return filtered.sort((a, b) =>

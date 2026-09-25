@@ -4,6 +4,7 @@ exports[`MCP tool metadata > exposes the expected tool surface 1`] = `
 [
   "mindvault_setup_wallet",
   "mindvault_wallet_info",
+  "mindvault_repair_sponsored_account",
   "mindvault_use_profile",
   "mindvault_list_profiles",
   "mindvault_browse",
@@ -16,6 +17,7 @@ exports[`MCP tool metadata > exposes the expected tool surface 1`] = `
   "mindvault_register_onchain",
   "mindvault_agent_status",
   "mindvault_registry_info",
+  "mindvault_terms",
   "mindvault_network_profile",
   "mindvault_check_bindings",
   "mindvault_check_consistency",

@@ -201,6 +201,17 @@ export const TOOLS_WITHOUT_ARG_VALIDATION: readonly string[] = [
  */
 export const TOOL_ARGUMENT_SPECS: Record<string, ToolArgumentSpec> = {
   mindvault_setup_wallet: { profile: PROFILE_NAME, confirmMainnet: CONFIRM_MAINNET },
+  mindvault_repair_sponsored_account: {
+    secretKey: {
+      kind: "string",
+      required: true,
+      maxLength: 56,
+      pattern: /^S[A-Z2-7]{55}$/,
+      patternHint: "a Stellar secret key (S… , 56 chars)",
+    },
+    profile: PROFILE_NAME,
+    confirmMainnet: CONFIRM_MAINNET,
+  },
   mindvault_wallet_info: {},
   mindvault_use_profile: { name: { ...PROFILE_NAME, required: true } },
   mindvault_list_profiles: {},
@@ -253,6 +264,7 @@ export const TOOL_ARGUMENT_SPECS: Record<string, ToolArgumentSpec> = {
     since: { kind: "string", maxLength: 64 },
     until: { kind: "string", maxLength: 64 },
     limit: { kind: "integer", min: 1, max: RECEIPT_EXPORT_MAX_LIMIT },
+    groupBy: { kind: "enum", values: ["month"] },
   },
   mindvault_register_onchain: {
     resourceId: RESOURCE_ID,
@@ -261,6 +273,12 @@ export const TOOL_ARGUMENT_SPECS: Record<string, ToolArgumentSpec> = {
   },
   mindvault_agent_status: {},
   mindvault_registry_info: {},
+  mindvault_terms: {
+    operation: { kind: "enum", required: true, values: ["get", "set"] },
+    creator: STELLAR_ADDRESS,
+    termsHash: { kind: "string", maxLength: 64 },
+    confirmMainnet: CONFIRM_MAINNET,
+  },
   mindvault_network_profile: {},
   mindvault_check_bindings: {},
   mindvault_check_consistency: {
