@@ -18,6 +18,7 @@ import {
   knownToolNames,
   optionalString,
   requiredString,
+  requiredTagArray,
   validateToolArgs,
 } from "./validation.js";
 
@@ -407,6 +408,44 @@ describe("normalized output", () => {
 });
 
 // ── Catalog filters: the browse/search argument surface ─────────────────────
+
+describe("tag array arguments", () => {
+  it("normalizes, deduplicates, and accepts an empty replacement", () => {
+    const args = validateToolArgs("mindvault_set_tags", {
+      resourceId: "res-001",
+      tags: [" Dataset ", "dataset", "API"],
+    });
+    expect(requiredTagArray(args, "tags")).toEqual(["dataset", "api"]);
+    expect(
+      requiredTagArray(
+        validateToolArgs("mindvault_set_tags", { resourceId: "res-001", tags: [] }),
+        "tags",
+      ),
+    ).toEqual([]);
+  });
+
+  it("accepts the documented comma-separated convenience form", () => {
+    const args = validateToolArgs("mindvault_set_tags", {
+      resourceId: "res-001",
+      tags: "dataset, research",
+    });
+    expect(requiredTagArray(args, "tags")).toEqual(["dataset", "research"]);
+  });
+
+  it("rejects invalid tag arrays with a stable issue code", () => {
+    const tooMany = expectInvalid("mindvault_set_tags", {
+      resourceId: "res-001",
+      tags: Array.from({ length: 9 }, (_, i) => `tag-${i}`),
+    });
+    expect(tooMany.issues[0].code).toBe("invalid_tag_array");
+
+    const invalidCharacter = expectInvalid("mindvault_set_tags", {
+      resourceId: "res-001",
+      tags: ["not valid"],
+    });
+    expect(invalidCharacter.issues[0].code).toBe("invalid_tag_array");
+  });
+});
 
 describe("catalog filter arguments", () => {
   it("accepts every sort value on browse and on search", () => {

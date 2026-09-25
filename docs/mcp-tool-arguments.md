@@ -48,8 +48,8 @@ Error: Unknown tool: mindvault_by. Available tools: mindvault_agent_status, mind
 
 Each issue carries a stable code (`unknown_argument`, `missing_required`,
 `wrong_type`, `empty_string`, `too_short`, `too_long`, `pattern_mismatch`,
-`not_in_enum`, `invalid_hash`, `not_an_object`) for clients that want to branch
-on the failure rather than parse prose.
+`not_in_enum`, `invalid_hash`, `invalid_tag_array`, `not_an_object`) for clients
+that want to branch on the failure rather than parse prose.
 
 ---
 
@@ -58,6 +58,10 @@ on the failure rather than parse prose.
 `confirmMainnet` (flag, optional) is accepted by every mutating tool and is
 **required on mainnet** unless `MINDVAULT_ALLOW_MAINNET=1` is set on the server
 — see [mainnet guardrails](mainnet-deployment-checklist.md).
+
+`confirmPaid` (flag, optional) is accepted by every tool that submits a paid
+mutation and is required when `MINDVAULT_CONFIRM_PAID_OPERATIONS` is set to
+`usdc` or `all`.
 
 | Tool                           | Argument               | Required | Accepted values                                  |
 | ------------------------------ | ---------------------- | -------- | ------------------------------------------------ |
@@ -89,6 +93,8 @@ on the failure rather than parse prose.
 |                                | `newCreator`           | yes      | Stellar public key (`G…`, 56 chars)              |
 | `mindvault_set_listed`         | `resourceId`           | yes      | resource id                                      |
 |                                | `listed`               | yes      | boolean (`true`/`false`)                         |
+| `mindvault_set_tags`           | `resourceId`           | yes      | resource id                                      |
+|                                | `tags`                 | yes      | 0–8 normalized tag strings (max 32 chars)        |
 | `mindvault_agent_status`       | —                      | —        | takes no arguments                               |
 | `mindvault_registry_info`      | —                      | —        | takes no arguments                               |
 | `mindvault_network_profile`    | —                      | —        | takes no arguments                               |
@@ -119,13 +125,14 @@ server calls.
 Handlers receive normalized values, so a tool behaves identically whichever
 accepted spelling the agent used:
 
-| Argument kind          | Normalization                 |
-| ---------------------- | ----------------------------- |
-| string                 | trimmed                       |
-| enum                   | trimmed, compared exactly     |
-| flag                   | coerced to a real boolean     |
-| `txHash`               | lowercased bare hex           |
-| `expectedMetadataHash` | canonical `sha256:<hex>` form |
+| Argument kind          | Normalization                     |
+| ---------------------- | --------------------------------- |
+| string                 | trimmed                           |
+| enum                   | trimmed, compared exactly         |
+| flag                   | coerced to a real boolean         |
+| `txHash`               | lowercased bare hex               |
+| `expectedMetadataHash` | canonical `sha256:<hex>` form     |
+| `tags`                 | trimmed, lowercased, deduplicated |
 
 ---
 

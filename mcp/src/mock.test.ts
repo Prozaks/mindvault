@@ -4,6 +4,7 @@ import {
   mockEnabledFromEnv,
   MOCK_CATALOG_RESOURCES,
   MOCK_REGISTRY_RESOURCES,
+  mockSetTags,
 } from "./mock.js";
 
 describe("mockEnabledFromEnv", () => {
@@ -54,6 +55,19 @@ describe("mockBuyReceipt", () => {
     const r2 = mockBuyReceipt("mock-1", "1.50");
     expect(r1.txHash).toBe(r2.txHash);
     expect(r1.receiptRef).toBe(r2.receiptRef);
+  });
+});
+
+describe("mockSetTags", () => {
+  it("returns a deterministic successful replacement payload", () => {
+    const result = JSON.parse(mockSetTags("res-1", ["dataset", "api"]));
+    expect(result).toMatchObject({
+      status: "success",
+      resourceId: "res-1",
+      tags: ["dataset", "api"],
+      source: "on-chain (mock)",
+    });
+    expect(result.txHash).toBe("MOCK_TX_SET_TAGS_res-1");
   });
 });
 

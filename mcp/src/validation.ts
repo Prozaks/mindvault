@@ -291,6 +291,7 @@ export const TOOL_ARGUMENT_SPECS: Record<string, ToolArgumentSpec> = {
     resourceId: RESOURCE_ID,
     tags: { kind: "tag_array", required: true },
     confirmMainnet: CONFIRM_MAINNET,
+    confirmPaid: CONFIRM_PAID,
   },
   mindvault_update_metadata: {
     resourceId: RESOURCE_ID,

@@ -132,6 +132,18 @@ export async function getResourceById(id: string) {
     .then((rows) => rows[0] ?? null);
 }
 
+export async function saveResourceTags(id: string, tags: string[]): Promise<boolean> {
+  const [resource] = await db
+    .update(resources)
+    .set({ tags })
+    .where(eq(resources.id, id))
+    .returning({ id: resources.id });
+
+  if (!resource) return false;
+  invalidateReads(id);
+  return true;
+}
+
 export type CatalogSort = "newest" | "price_asc" | "price_desc" | "title";
 
 export type CatalogListFilters = {
@@ -191,6 +203,7 @@ async function queryCatalog() {
       verificationStatus: resources.verificationStatus,
       publisherName: publishers.name,
       walletAddress: resources.walletAddress,
+      tags: resources.tags,
       createdAt: resources.createdAt,
     })
     .from(resources)
@@ -343,6 +356,7 @@ async function queryResourceMeta(id: string) {
       verificationStatus: resources.verificationStatus,
       publisherName: publishers.name,
       publisherWallet: resources.walletAddress,
+      tags: resources.tags,
       thumbnailPath: resources.thumbnailPath,
       onchainStatus: resources.onchainStatus,
       onchainTxHash: resources.onchainTxHash,
