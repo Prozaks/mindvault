@@ -226,6 +226,52 @@ fn setup_with_verifier<'a>() -> (
 // Acceptance tests — creator-gated methods
 // ---------------------------------------------------------------------------
 
+/// `build_register_invoke` produces an invoke the SDK accepts for the creator.
+#[test]
+fn auth_fixture_register_accepted_for_creator() {
+    let env = soroban_sdk::Env::default();
+    let contract_id = env.register(VaultRegistry, ());
+    let client = VaultRegistryClient::new(&env, &contract_id);
+    let creator = soroban_sdk::Address::generate(&env);
+    let id = soroban_sdk::String::from_str(&env, "authreg");
+    let price = 1_000i128;
+    let metadata = soroban_sdk::String::from_str(&env, "ipfs://authreg");
+    let tags = empty_tags(&env);
+    let invoke = build_register_invoke(&env, &creator, &client, &id, price, &metadata, &tags);
+    let auth = [MockAuth {
+        address: &creator,
+        invoke: &invoke,
+    }];
+    client
+        .mock_auths(&auth)
+        .register(&creator, &id, &price, &metadata, &tags);
+    assert_eq!(client.get(&id).creator, creator);
+}
+
+/// Supplying a stranger's auth panics, so a registration cannot be made to look
+/// as though a third party authored it.
+#[test]
+#[should_panic]
+fn auth_fixture_register_rejected_for_stranger() {
+    let env = soroban_sdk::Env::default();
+    let contract_id = env.register(VaultRegistry, ());
+    let client = VaultRegistryClient::new(&env, &contract_id);
+    let creator = soroban_sdk::Address::generate(&env);
+    let stranger = soroban_sdk::Address::generate(&env);
+    let id = soroban_sdk::String::from_str(&env, "authreg2");
+    let price = 1_000i128;
+    let metadata = soroban_sdk::String::from_str(&env, "ipfs://authreg2");
+    let tags = empty_tags(&env);
+    let invoke = build_register_invoke(&env, &creator, &client, &id, price, &metadata, &tags);
+    let auth = [MockAuth {
+        address: &stranger,
+        invoke: &invoke,
+    }];
+    client
+        .mock_auths(&auth)
+        .register(&creator, &id, &price, &metadata, &tags);
+}
+
 /// `build_set_price_invoke` produces an invoke the SDK accepts for the owner.
 #[test]
 fn auth_fixture_set_price_accepted_for_owner() {
