@@ -48,6 +48,8 @@ export const MAINNET_GATED_TOOLS = [
   "mindvault_update_metadata",
   "mindvault_set_price",
   "mindvault_transfer_ownership",
+  "mindvault_accept_transfer",
+  "mindvault_cancel_transfer",
   "mindvault_set_listed",
   "mindvault_freeze",
   "mindvault_royalty",

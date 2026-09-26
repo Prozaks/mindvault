@@ -1,5 +1,126 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
+exports[`tool schema snapshots > mindvault_accept_transfer > annotations 1`] = `
+{
+  "destructiveHint": false,
+  "idempotentHint": false,
+  "readOnlyHint": false,
+  "title": "Accept Transfer",
+}
+`;
+
+exports[`tool schema snapshots > mindvault_accept_transfer > input schema 1`] = `
+{
+  "properties": {
+    "confirmMainnet": {
+      "description": "Required on mainnet (or set MINDVAULT_ALLOW_MAINNET=1). Explicitly confirm this mutation on the public Stellar network.",
+      "type": "boolean",
+    },
+    "resourceId": {
+      "description": "The resource ID whose pending transfer to accept. Example: 'cm7x8y9z'",
+      "examples": [
+        "cm7x8y9z",
+        "res-001",
+      ],
+      "type": "string",
+    },
+  },
+  "required": [
+    "resourceId",
+  ],
+  "type": "object",
+}
+`;
+
+exports[`tool schema snapshots > mindvault_accept_transfer > output schema 1`] = `
+{
+  "oneOf": [
+    {
+      "properties": {
+        "listed": {
+          "type": "boolean",
+        },
+        "metadata": {
+          "type": "string",
+        },
+        "newCreator": {
+          "type": "string",
+        },
+        "price": {
+          "type": "string",
+        },
+        "resourceId": {
+          "type": "string",
+        },
+        "status": {
+          "type": "string",
+        },
+        "txHash": {
+          "type": [
+            "string",
+            "null",
+          ],
+        },
+      },
+      "required": [
+        "status",
+        "resourceId",
+        "txHash",
+      ],
+      "type": "object",
+    },
+    {
+      "properties": {
+        "intentions": {
+          "type": "object",
+        },
+        "mode": {
+          "const": "dry-run",
+          "type": "string",
+        },
+        "operation": {
+          "type": "string",
+        },
+        "steps": {
+          "items": {
+            "type": "string",
+          },
+          "type": "array",
+        },
+        "validation": {
+          "type": "object",
+        },
+      },
+      "required": [
+        "mode",
+        "operation",
+        "validation",
+        "intentions",
+        "steps",
+      ],
+      "type": "object",
+    },
+    {
+      "properties": {
+        "message": {
+          "type": "string",
+        },
+        "status": {
+          "const": "text",
+          "type": "string",
+        },
+      },
+      "required": [
+        "status",
+        "message",
+      ],
+      "type": "object",
+    },
+  ],
+  "type": "object",
+}
+`;
+
 exports[`tool schema snapshots > mindvault_agent_status > annotations 1`] = `
 {
   "destructiveHint": false,
@@ -2318,6 +2439,92 @@ exports[`tool schema snapshots > mindvault_publish_batch > output schema 1`] = `
     "onchainStatus",
     "txHash",
     "items",
+  ],
+  "type": "object",
+}
+`;
+
+exports[`tool schema snapshots > mindvault_publish > output schema 1`] = `
+{
+  "oneOf": [
+    {
+      "properties": {
+        "after": {},
+        "before": {},
+        "changedFields": {
+          "items": {
+            "type": "string",
+          },
+          "type": "array",
+        },
+        "failureGuidance": {
+          "type": [
+            "array",
+            "null",
+          ],
+        },
+        "txHash": {
+          "type": [
+            "string",
+            "null",
+          ],
+        },
+      },
+      "required": [
+        "before",
+        "after",
+        "changedFields",
+        "txHash",
+      ],
+      "type": "object",
+    },
+    {
+      "properties": {
+        "intentions": {
+          "type": "object",
+        },
+        "mode": {
+          "const": "dry-run",
+          "type": "string",
+        },
+        "operation": {
+          "type": "string",
+        },
+        "steps": {
+          "items": {
+            "type": "string",
+          },
+          "type": "array",
+        },
+        "validation": {
+          "type": "object",
+        },
+      },
+      "required": [
+        "mode",
+        "operation",
+        "validation",
+        "intentions",
+        "steps",
+      ],
+      "type": "object",
+    },
+    {
+      "properties": {
+        "message": {
+          "type": "string",
+        },
+        "status": {
+          "const": "text",
+          "type": "string",
+        },
+      },
+      "required": [
+        "status",
+        "message",
+      ],
+      "type": "object",
+    },
   ],
   "type": "object",
 }
@@ -4950,11 +5157,13 @@ exports[`tool schema snapshots > mindvault_wallet_info > output schema 1`] = `
 
 exports[`tool schema snapshots > the covered tool names are pinned 1`] = `
 [
+  "mindvault_accept_transfer",
   "mindvault_agent_status",
   "mindvault_backup_state",
   "mindvault_batch_catalog_lookup",
   "mindvault_browse",
   "mindvault_buy",
+  "mindvault_cancel_transfer",
   "mindvault_check_bindings",
   "mindvault_check_consistency",
   "mindvault_check_state_permissions",

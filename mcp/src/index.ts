@@ -67,6 +67,8 @@ import {
   mockUpdateMetadata,
   mockSetPrice,
   mockTransferOwnership,
+  mockAcceptTransfer,
+  mockCancelTransfer,
   mockSetListed,
   mockSetTags,
 } from "./mock.js";
@@ -2890,8 +2892,6 @@ export async function setTags(resourceId: string, tags: string[]): Promise<strin
 }
 
 export async function registryLookup(resourceId: string): Promise<string> {
-  if (_isMock())
-    return mockRegistryLookup(resourceId, REGISTRY_CONTRACT_ID, currentWallet()?.publicKey);
   const client = createRegistryClient({
     contractId: REGISTRY_CONTRACT_ID,
     rpcUrl: SOROBAN_RPC_URL,
@@ -3598,6 +3598,8 @@ const STATE_MUTATING_TOOLS = new Set([
   "mindvault_update_metadata",
   "mindvault_set_price",
   "mindvault_transfer_ownership",
+  "mindvault_accept_transfer",
+  "mindvault_cancel_transfer",
   "mindvault_set_listed",
   "mindvault_set_tags",
   "mindvault_freeze",
@@ -3786,6 +3788,10 @@ async function dispatchToolOutcome(
           requiredString(args, "resourceId"),
           requiredString(args, "newCreator"),
         );
+      case "mindvault_accept_transfer":
+        return acceptTransfer(requiredString(args, "resourceId"));
+      case "mindvault_cancel_transfer":
+        return cancelTransfer(requiredString(args, "resourceId"));
       case "mindvault_set_listed":
         return setListed(requiredString(args, "resourceId"), flag(args, "listed"));
       case "mindvault_set_tags":

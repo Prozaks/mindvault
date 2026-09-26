@@ -399,6 +399,34 @@ export function mockTransferOwnership(resourceId: string, newCreator: string): s
   );
 }
 
+export function mockAcceptTransfer(resourceId: string): string {
+  return JSON.stringify(
+    {
+      status: "success",
+      resourceId,
+      txHash: `MOCK_TX_ACCEPT_TRANSFER_${resourceId}`,
+      explorerUrl: explorerTxUrl(`MOCK_TX_ACCEPT_TRANSFER_${resourceId}`),
+      source: "on-chain (mock)",
+    },
+    null,
+    2,
+  );
+}
+
+export function mockCancelTransfer(resourceId: string): string {
+  return JSON.stringify(
+    {
+      status: "success",
+      resourceId,
+      txHash: `MOCK_TX_CANCEL_TRANSFER_${resourceId}`,
+      explorerUrl: explorerTxUrl(`MOCK_TX_CANCEL_TRANSFER_${resourceId}`),
+      source: "on-chain (mock)",
+    },
+    null,
+    2,
+  );
+}
+
 export function mockSetListed(resourceId: string, listed: boolean): string {
   return JSON.stringify(
     {

@@ -1027,6 +1027,62 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     },
   },
   {
+    name: "mindvault_accept_transfer",
+    description:
+      "Accept a pending ownership transfer of a registered resource. Only the address that was nominated as the new owner via mindvault_transfer_ownership can call this — the wallet must be the proposed new creator.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        resourceId: {
+          type: "string",
+          description: "The resource ID whose pending transfer to accept. Example: 'cm7x8y9z'",
+          examples: ["cm7x8y9z", "res-001"],
+        },
+        confirmMainnet: {
+          type: "boolean",
+          description:
+            "Required on mainnet (or set MINDVAULT_ALLOW_MAINNET=1). Explicitly confirm this mutation on the public Stellar network.",
+        },
+      },
+      required: ["resourceId"],
+    },
+    outputSchema: ONCHAIN_MUTATION_OUTPUT_SCHEMA as unknown as Record<string, unknown>,
+    annotations: {
+      title: "Accept Transfer",
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+    },
+  },
+  {
+    name: "mindvault_cancel_transfer",
+    description:
+      "Cancel a pending ownership transfer of a registered resource. Only the current resource owner may call this. After an accepted transfer this will return an error — use this only while the transfer is still pending.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        resourceId: {
+          type: "string",
+          description: "The resource ID whose pending transfer to cancel. Example: 'cm7x8y9z'",
+          examples: ["cm7x8y9z", "res-001"],
+        },
+        confirmMainnet: {
+          type: "boolean",
+          description:
+            "Required on mainnet (or set MINDVAULT_ALLOW_MAINNET=1). Explicitly confirm this mutation on the public Stellar network.",
+        },
+      },
+      required: ["resourceId"],
+    },
+    outputSchema: ONCHAIN_MUTATION_OUTPUT_SCHEMA as unknown as Record<string, unknown>,
+    annotations: {
+      title: "Cancel Transfer",
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+    },
+  },
+  {
     name: "mindvault_set_listed",
     description:
       "Manage catalog availability by changing the listed state (listed or delisted) of a resource on the vault registry contract. Only the resource creator/owner may call this.",

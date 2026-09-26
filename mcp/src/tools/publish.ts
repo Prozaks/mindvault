@@ -1090,3 +1090,107 @@ export async function setListed(resourceId: string, listed: boolean): Promise<st
     2,
   );
 }
+
+export async function acceptTransfer(resourceId: string): Promise<string> {
+  const wallet = requireWallet();
+  if (_isMock()) return mockAcceptTransfer(resourceId);
+
+  const client = makeClient(wallet.publicKey);
+
+  let tx: Awaited<ReturnType<typeof client.accept_transfer>>;
+  try {
+    tx = await client.accept_transfer({ id: resourceId });
+  } catch (err: any) {
+    if (isTimeoutError(err)) {
+      throw mcpError(
+        mapTransportError({
+          operation: `Accept transfer failed for resource "${resourceId}"`,
+          source: "soroban",
+          error: err,
+        }),
+      );
+    }
+    throw mcpError(
+      mapRegistryError({
+        operation: `Accept transfer failed for resource "${resourceId}"`,
+        message: err?.message || String(err),
+      }),
+    );
+  }
+
+  const result = tx.result;
+  if (result.isErr()) {
+    const err = result.unwrapErr();
+    const notFound = err.message === RegistryErrors[2].message;
+    throw mcpError(
+      mapRegistryError({
+        operation: `Accept transfer failed for resource "${resourceId}"`,
+        message: err.message,
+        notFound,
+      }),
+    );
+  }
+
+  const txHash = await signAndSendRegistryTx(resourceId, "Accept transfer", tx, wallet.secretKey);
+  return JSON.stringify(
+    {
+      status: "success",
+      resourceId,
+      txHash,
+    },
+    null,
+    2,
+  );
+}
+
+export async function cancelTransfer(resourceId: string): Promise<string> {
+  const wallet = requireWallet();
+  if (_isMock()) return mockCancelTransfer(resourceId);
+
+  const client = makeClient(wallet.publicKey);
+
+  let tx: Awaited<ReturnType<typeof client.cancel_transfer>>;
+  try {
+    tx = await client.cancel_transfer({ id: resourceId });
+  } catch (err: any) {
+    if (isTimeoutError(err)) {
+      throw mcpError(
+        mapTransportError({
+          operation: `Cancel transfer failed for resource "${resourceId}"`,
+          source: "soroban",
+          error: err,
+        }),
+      );
+    }
+    throw mcpError(
+      mapRegistryError({
+        operation: `Cancel transfer failed for resource "${resourceId}"`,
+        message: err?.message || String(err),
+      }),
+    );
+  }
+
+  const result = tx.result;
+  if (result.isErr()) {
+    const err = result.unwrapErr();
+    const notFound = err.message === RegistryErrors[2].message;
+    throw mcpError(
+      mapRegistryError({
+        operation: `Cancel transfer failed for resource "${resourceId}"`,
+        message: err.message,
+        notFound,
+      }),
+    );
+  }
+
+  const txHash = await signAndSendRegistryTx(resourceId, "Cancel transfer", tx, wallet.secretKey);
+  return JSON.stringify(
+    {
+      status: "success",
+      resourceId,
+      txHash,
+    },
+    null,
+    2,
+  );
+}

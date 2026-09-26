@@ -69,6 +69,8 @@ import {
   updateMetadata,
   setPrice,
   transferOwnership,
+  acceptTransfer,
+  cancelTransfer,
   setListed,
   setTags,
   normalizeMetadataPointer,
@@ -2215,12 +2217,97 @@ describe("transferOwnership", () => {
   });
 });
 
+// ── acceptTransfer ──────────────────────────────────────────────────────────
+
+describe("acceptTransfer", () => {
+  beforeEach(() => {
+    _resetProfiles();
+  });
+
+  it("throws when no wallet is set up", async () => {
+    await expect(acceptTransfer("res-001")).rejects.toThrow("No wallet");
+  });
+
+  it("succeeds in mock mode when wallet is present", async () => {
+    _setAgentWallet({
+      publicKey: "GA6HCMBLTZS5VYYBCATRBRZ3BZJMAFUDKYYF6AH6MVCMGWMRDNSWJPIH",
+      secretKey: "SD1234567890123456789012345678901234567890123456789012345",
+    });
+    process.env.MINDVAULT_MOCK = "1";
+    try {
+      const res = await acceptTransfer("res-001");
+      const parsed = JSON.parse(res);
+      expect(parsed.status).toBe("success");
+      expect(parsed.resourceId).toBe("res-001");
+      expect(parsed.txHash).toBeTruthy();
+    } finally {
+      delete process.env.MINDVAULT_MOCK;
+    }
+  });
+
+  it("dispatches through dispatchTool with valid arguments", async () => {
+    _setAgentWallet({
+      publicKey: "GA6HCMBLTZS5VYYBCATRBRZ3BZJMAFUDKYYF6AH6MVCMGWMRDNSWJPIH",
+      secretKey: "SD1234567890123456789012345678901234567890123456789012345",
+    });
+    process.env.MINDVAULT_MOCK = "1";
+    try {
+      const res = await dispatchTool("mindvault_accept_transfer", { resourceId: "res-001" });
+      expect(res).toContain("success");
+    } finally {
+      delete process.env.MINDVAULT_MOCK;
+    }
+  });
+});
+
+// ── cancelTransfer ──────────────────────────────────────────────────────────
+
+describe("cancelTransfer", () => {
+  beforeEach(() => {
+    _resetProfiles();
+  });
+
+  it("throws when no wallet is set up", async () => {
+    await expect(cancelTransfer("res-001")).rejects.toThrow("No wallet");
+  });
+
+  it("succeeds in mock mode when wallet is present", async () => {
+    _setAgentWallet({
+      publicKey: "GA6HCMBLTZS5VYYBCATRBRZ3BZJMAFUDKYYF6AH6MVCMGWMRDNSWJPIH",
+      secretKey: "SD1234567890123456789012345678901234567890123456789012345",
+    });
+    process.env.MINDVAULT_MOCK = "1";
+    try {
+      const res = await cancelTransfer("res-001");
+      const parsed = JSON.parse(res);
+      expect(parsed.status).toBe("success");
+      expect(parsed.resourceId).toBe("res-001");
+      expect(parsed.txHash).toBeTruthy();
+    } finally {
+      delete process.env.MINDVAULT_MOCK;
+    }
+  });
+
+  it("dispatches through dispatchTool with valid arguments", async () => {
+    _setAgentWallet({
+      publicKey: "GA6HCMBLTZS5VYYBCATRBRZ3BZJMAFUDKYYF6AH6MVCMGWMRDNSWJPIH",
+      secretKey: "SD1234567890123456789012345678901234567890123456789012345",
+    });
+    process.env.MINDVAULT_MOCK = "1";
+    try {
+      const res = await dispatchTool("mindvault_cancel_transfer", { resourceId: "res-001" });
+      expect(res).toContain("success");
+    } finally {
+      delete process.env.MINDVAULT_MOCK;
+    }
+  });
+});
+
 // ── setListed (#400) ────────────────────────────────────────────────────────
 
 describe("setListed", () => {
   beforeEach(() => {
-    _resetProfiles();
-  });
+    _resetProfiles();  });
 
   it("throws when no wallet is set up", async () => {
     await expect(setListed("res-001", false)).rejects.toThrow("No wallet");
