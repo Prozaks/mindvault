@@ -66,6 +66,13 @@ export interface McpConfig {
   readonly horizonUrl: string;
   /** Soroban RPC URL (`SOROBAN_RPC_URL` or preset). */
   readonly sorobanRpcUrl: string;
+  /**
+   * Platform (vault operator) wallet address, from `PLATFORM_WALLET_ADDRESS`.
+   * Used by `mindvault_wallet_balances` to report the platform balance next to
+   * the agent wallets. `null` when not configured. This is the MCP-side twin of
+   * the server's `PAY_TO`: it names the wallet that receives publisher payouts.
+   */
+  readonly platformWalletAddress: string | null;
 }
 
 /**
@@ -89,6 +96,9 @@ export function buildConfig(env: NodeJS.ProcessEnv = process.env): McpConfig {
     sponsoredAccountUrl: env.SPONSORED_ACCOUNT_URL ?? DEFAULT_SPONSORED_ACCOUNT_URL,
     horizonUrl: env.HORIZON_URL ?? networkPreset.horizonUrl,
     sorobanRpcUrl: env.SOROBAN_RPC_URL ?? networkPreset.sorobanRpcUrl,
+    platformWalletAddress: env.PLATFORM_WALLET_ADDRESS?.trim()
+      ? env.PLATFORM_WALLET_ADDRESS.trim()
+      : null,
   });
 }
 

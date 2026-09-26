@@ -43,13 +43,13 @@ verification rejected, missing tx hash), the text is unchanged and
 
 | Group         | Tools                                                                                                                                     | Typical fields                                                                        |
 | ------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| Catalog       | `browse`, `search`                                                                                                                        | `items[]` (`id`, `title`, `price`, `description`, `accessUrl`), `notice`, `truncated` |
+| Catalog       | `browse`, `search`, `batch_catalog_lookup`, `preview_metadata_hash`                                                                       | `items[]` (`id`, `title`, `price`, `description`, `accessUrl`), `notice`, `truncated`; batch adds `requested`, `foundCount`, `missing`; hash preview returns `pointer` + `report` |
 | Wallet        | `setup_wallet`, `import_wallet`, `wallet_info`, `use_profile`, `list_profiles`                                                            | `address`, `profile`, balances                                                        |
 | JSON handlers | `preview`, `publish`, `buy`, `publish_status`, `purchase_history`, `export_receipts`, registry reads/mutations, `tx_status`, `metrics`, … | existing JSON object, also as `structuredContent`                                     |
 
 Text-only: `check_bindings`, `reset`, `backup_state`, `restore_state`,
 `verify_install`, `registry_health`, `check_state_permissions`, `register`,
-`rotate_publisher_key`. `mindvault_set_tags` has no handler.
+`rotate_publisher_key`, `mindvault_set_tags`.
 
 `mindvault_publish_status` and `mindvault_purchase_history` are advertised in
 ListTools with extra schemas (they are not in `TOOL_DEFINITIONS`).

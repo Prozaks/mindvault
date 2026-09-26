@@ -7,6 +7,7 @@
 import {
   checkContractBindings,
   createRegistryClient,
+  getAttestationHash,
   Errors as RegistryErrors,
   listResources,
   type Resource,
@@ -29,37 +30,38 @@ import { applyPreviewLimits, serializePreview } from "./previewLimits.js";
 import { createEd25519Signer } from "@x402/stellar";
 import { ExactStellarScheme } from "@x402/stellar/exact/client";
 import { wrapFetchWithPayment, x402Client } from "@x402/fetch";
+import { Client as DynamicContractClient } from "@stellar/stellar-sdk/contract";
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
-import { Mutex } from "./mutex.js";
 import { cacheStalenessNotice } from "./cacheStaleness.js";
-import {
-  catalogCacheLabel,
-  getCatalogSnapshot,
-  getPreviewSnapshot,
-  recordCatalogSnapshot,
-  recordPreviewSnapshot,
-} from "./catalogCache.js";
-import {
-  collectStartupDiagnostics,
-  formatDiagnostics,
-  hasBlockingDiagnostics,
-} from "./diagnostics.js";
+import { buildConfig, resolveConfig } from "./config.js";
 import {
   assertMainnetMutationAllowed,
+  formatMainnetBanner,
   formatMainnetDiagnostics,
   mainnetAllowedFromEnv,
 } from "./mainnetGuardrails.js";
 import {
+  assertPaidOperationConfirmed,
+  formatPaidConfirmationDiagnostics,
+} from "./paidOperations.js";
+import { assertToolAllowedInReadOnlyMode } from "./readOnlyMode.js";
+import {
   createMetricsRecorder,
   measureTool,
   metricsEnabledFromEnv,
+  metricsExportLine,
+  metricsExportToConsoleEnabled,
+  normalizeMetricsExportFormat,
   resolveToolDurationBudget,
+  serializeMetricsExport,
+  type MetricsExportFormat,
 } from "./metrics.js";
 import {
   createMockFetch,
   mockEnabledFromEnv,
+  mockRegistryCount,
   mockRegistryLookup,
   mockRegistryList,
   mockUpdateMetadata,
@@ -68,12 +70,15 @@ import {
   mockAcceptTransfer,
   mockCancelTransfer,
   mockSetListed,
+  mockSetTags,
 } from "./mock.js";
 import { purchaseHistoryTool, recordPurchase } from "./purchaseHistory.js";
-import { EXTRA_OUTPUT_SCHEMAS } from "./outputSchemas.js";
+import { Mutex } from "./mutex.js";
 import { exportReceiptsTool } from "./receipts.js";
+import { debugBundleTool } from "./debugBundle.js";
+import { exportReceiptsToolWithTimeout } from "./receipts.js";
 import { normalizeToolResult, outcomeText, type ToolOutcome } from "./toolResult.js";
-import { TOOL_DEFINITIONS, type ToolDefinition } from "./tools.js";
+import { advertisedTools, hasOutputSchema } from "./toolSurface.js";
 import { dryRunPublish, dryRunBuy } from "./dryRun.js";
 import { initAuditLogging } from "./auditLog.js";
 import { REGISTRY_LIST_DEFAULT_LIMIT, REGISTRY_LIST_DEFAULT_START } from "./registryPagination.js";
@@ -82,8 +87,11 @@ import {
   optionalInt,
   optionalString,
   requiredString,
+  requiredTagArray,
   TOOL_ARGUMENT_SPECS,
+  TOOLS_WITHOUT_ARG_VALIDATION,
   UnknownToolError,
+  requiredStringArray,
   validateToolArgs,
   type ValidatedArgs,
 } from "./validation.js";
@@ -105,18 +113,34 @@ import {
   type PublishProgressReporter,
   type PublishStatusFetch,
 } from "./publishStatus.js";
+import {
+  normalizeIntervalMs as normalizeResourceIntervalMs,
+  normalizeTimeoutMs as normalizeResourceTimeoutMs,
+  normalizeWaitFlag as normalizeResourceWaitFlag,
+  subscribeResource,
+  type ResourceProgressReporter,
+  type ResourceSubscriptionSnapshot,
+} from "./resourceSubscriptionTool.js";
 import { type ApiResponse } from "./apiResponse.js";
 import { safeErrorMessage, safeLog } from "./redaction.js";
-import { assertAutoPaymentWithinCeiling } from "./paymentCeiling.js";
+import { assertAutoPaymentWithinCeiling, assertTransactionFeeWithinCeiling } from "./paymentCeiling.js";
+import {
+  compareUsdc,
+  normalizeUsdcBalance,
+  stroopsToUsdc,
+  trimUsdc,
+  usdcToStroops as toStroops,
+} from "./usdcAmount.js";
 import { signMutatingHeaders } from "./requestSignature.js";
 import {
-  exportState,
+  exportStateFile,
   restoreState,
   checkStatePermissions,
   preserveLegacyState,
   quarantineStateFile,
   writeAtomically,
 } from "./stateBackup.js";
+import { provenanceChain, recordResourceHistory, resourceChangeLog } from "./resourceHistory.js";
 import { formatResetPreview, isResetConfirmed, type ResetScope } from "./resetGuard.js";
 import { verifyInstall, formatVerifyInstall } from "./verifyInstall.js";
 import {
@@ -127,6 +151,7 @@ import {
   withTimeout,
   type TimeoutService,
 } from "./httpTimeout.js";
+import { resolveToolTimeouts, timeoutForTool } from "./toolTimeoutOverrides.js";
 import {
   describeRetryPolicy,
   formatRetryLog,
@@ -152,25 +177,38 @@ import {
 import {
   mapSponsoredHttpFailure,
   mapSponsoredTransportFailure,
+  sanitizeServiceUrl,
   SPONSORED_CREATE_PATH,
 } from "./sponsoredDiagnostics.js";
-import { parseMetadataHash } from "./metadataHash.js";
+import { describeMetadataPointerHash, parseMetadataHash } from "./metadataHash.js";
+import {
+  checkWalletIntegrity,
+  sponsoredWalletIntegrityError,
+  unownedWalletNote,
+  type DerivePublicKey,
+} from "./sponsoredWallet.js";
+import {
+  applyPublishTemplate,
+  KNOWN_RESOURCE_TYPES,
+  type KnownResourceType,
+} from "./publishTemplate.js";
 import {
   applyCatalogSort,
   applyClientCatalogFilters,
   buildCatalogQueryString,
-  catalogFilterInputProperties,
   describeCatalogFilters,
   parseCatalogFilters,
   type CatalogFilters,
 } from "./catalogFilters.js";
 import {
   catalogCacheLabel,
+  type CatalogFallbackReason,
   getCatalogSnapshot,
   getPreviewSnapshot,
   recordCatalogSnapshot,
   recordPreviewSnapshot,
 } from "./catalogCache.js";
+import { publishBatch, type BatchPublishItem } from "./tools/publish.js";
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -178,17 +216,28 @@ import {
 // unit-tested function so the config path no longer runs as an untestable
 // top-level side effect. The named aliases below keep the rest of this file
 // unchanged.
-const {
-  stellarNetwork: STELLAR_NETWORK,
-  networkPreset,
-  x402Network: NETWORK,
-  baseUrl: BASE_URL,
-  registryContractId: REGISTRY_CONTRACT_ID,
-  registryNetworkPassphrase: REGISTRY_NETWORK_PASSPHRASE,
-  sponsoredAccountUrl: SPONSORED_ACCOUNT_URL,
-  horizonUrl: HORIZON_URL,
-  sorobanRpcUrl: SOROBAN_RPC_URL,
-} = buildConfig(process.env);
+const initialConfig = buildConfig(process.env);
+let STELLAR_NETWORK = initialConfig.stellarNetwork;
+let networkPreset = initialConfig.networkPreset;
+let NETWORK = initialConfig.x402Network;
+const BASE_URL = initialConfig.baseUrl;
+let REGISTRY_CONTRACT_ID = initialConfig.registryContractId;
+let REGISTRY_NETWORK_PASSPHRASE = initialConfig.registryNetworkPassphrase;
+const SPONSORED_ACCOUNT_URL = initialConfig.sponsoredAccountUrl;
+let HORIZON_URL = initialConfig.horizonUrl;
+let SOROBAN_RPC_URL = initialConfig.sorobanRpcUrl;
+
+function applyNetworkConfig(network: "testnet" | "mainnet"): void {
+  process.env.STELLAR_NETWORK = network;
+  const next = buildConfig(process.env);
+  STELLAR_NETWORK = next.stellarNetwork;
+  networkPreset = next.networkPreset;
+  NETWORK = next.x402Network;
+  REGISTRY_CONTRACT_ID = next.registryContractId;
+  REGISTRY_NETWORK_PASSPHRASE = next.registryNetworkPassphrase;
+  HORIZON_URL = next.horizonUrl;
+  SOROBAN_RPC_URL = next.sorobanRpcUrl;
+}
 
 // Startup diagnostics: collect every configuration problem in one pass so the
 // operator sees the full list (with exact variable names and expected values)
@@ -222,6 +271,7 @@ const httpFetch: typeof fetch = MOCK
   : (input, init) => fetch(input as RequestInfo | URL, init);
 
 const TIMEOUTS = resolveTimeouts(process.env);
+const TOOL_TIMEOUTS = resolveToolTimeouts(process.env).overrides;
 
 const RETRY_POLICY = retryPolicyFromEnv(process.env);
 
@@ -229,7 +279,7 @@ const USER_AGENT = resolveUserAgent(process.env);
 
 const logRetry = process.env.VITEST
   ? undefined
-  : (info: RetryAttemptInfo) => console.error(`MindVault MCP: ${formatRetryLog(info)}`);
+  : (info: RetryAttemptInfo) => logger.info(`MindVault MCP: ${formatRetryLog(info)}`);
 
 function httpRetryOptions(label: string) {
   return {
@@ -266,6 +316,10 @@ function activeProfile(): WalletProfile {
   return (profiles[activeProfileName] ??= {});
 }
 
+function bindActiveProfileToNetwork(): void {
+  activeProfile().network ??= NETWORK;
+}
+
 function currentWallet(): AgentWallet | null {
   return profiles[activeProfileName]?.wallet ?? null;
 }
@@ -275,7 +329,10 @@ function currentApiKey(): string | null {
 }
 
 export function _setAgentWallet(w: AgentWallet | null): void {
-  if (w) activeProfile().wallet = w;
+  if (w) {
+    activeProfile().wallet = w;
+    bindActiveProfileToNetwork();
+  }
   else delete activeProfile().wallet;
 }
 export function _setAgentApiKey(k: string | null): void {
@@ -293,19 +350,27 @@ function applyRestoredState(state: ProfileState): void {
   saveState();
 }
 
-export function backupState(passphrase: string): string {
-  const blob = exportState(passphrase);
+export function backupState(passphrase: string, confirm: unknown = false): string {
+  if (!isResetConfirmed(confirm)) {
+    return [
+      "Backup NOT performed — confirmation required.",
+      "This will export every wallet secret key and publisher API key in encrypted form.",
+      "To proceed, call mindvault_backup_state again with confirm: true.",
+    ].join("\n");
+  }
+  const path = exportStateFile(passphrase);
   return [
-    "Encrypted state backup ready. Copy the blob below to the new environment.",
-    "Restore with mindvault_restore_state using the same passphrase.",
-    "The blob does not contain plaintext secrets.",
-    "",
-    blob,
+    "Encrypted state backup written.",
+    `File: ${path}`,
+    "The file is mode 0600 and contains no plaintext secrets.",
+    "Restore with mindvault_restore_state using the file contents as blob and the same passphrase.",
   ].join("\n");
 }
 
 export function restoreStateTool(blob: string, passphrase: string): string {
-  return restoreState(blob, passphrase, applyRestoredState);
+  return restoreState(blob, passphrase, applyRestoredState, {
+    expectedNetwork: NETWORK,
+  });
 }
 
 function quarantineCorruptState(reason: string, detail: string): void {
@@ -372,7 +437,15 @@ function persistableProfiles(): Record<string, WalletProfile> {
   return out;
 }
 
-function saveState(): void {
+/**
+ * Persist the profile state, reporting whether the write landed.
+ *
+ * A failed write stays non-fatal — losing the state file must not take the
+ * server down mid-session — but callers that just told the agent its wallet is
+ * safe on disk need to know when it is not (#839). Callers that do not care can
+ * keep ignoring the result.
+ */
+function saveState(): boolean {
   try {
     const state: ProfileState = {
       version: STATE_VERSION,
@@ -380,8 +453,10 @@ function saveState(): void {
       profiles: persistableProfiles(),
     };
     writeAtomically(STATE_FILE, JSON.stringify(state, null, 2), 0o600);
+    return true;
   } catch (err) {
     console.error("MindVault MCP: failed to persist state:", safeErrorMessage(err));
+    return false;
   }
 }
 
@@ -515,6 +590,44 @@ async function registryHealth(): Promise<string> {
   return lines.join("\n");
 }
 
+// ── #882: Catalog cache pre-warm ─────────────────────────────────────────────
+// browseOutcome() already records a fresh snapshot into catalogCache.ts on
+// every successful call and falls back to the last snapshot on a transport
+// failure — but on a genuine cold boot there is no snapshot yet, so the very
+// first failure has nothing to fall back to. This proactively triggers one
+// browse at MCP startup (and on demand via mindvault_prewarm_catalog) so that
+// if the API is unreachable early in a session, the fallback it serves is a
+// fresh one rather than none at all.
+export async function prewarmCatalogCache(): Promise<string> {
+  const startedAt = Date.now();
+  try {
+    await browseOutcome({});
+    const elapsedMs = Date.now() - startedAt;
+    const snapshot = getCatalogSnapshot();
+    const count = snapshot && Array.isArray(snapshot.resources) ? snapshot.resources.length : 0;
+    return `Catalog pre-warmed: ${count} resource(s) cached in ${elapsedMs}ms.`;
+  } catch (err) {
+    return `Catalog pre-warm failed: ${safeErrorMessage(err)}`;
+  }
+}
+
+// ── #878: Mainnet session banner ─────────────────────────────────────────────
+// formatMainnetDiagnostics/formatPaidConfirmationDiagnostics are compact
+// one-liners meant for repeated diagnostic output. This is the fuller,
+// session-level version: a plain-language explanation of the active network
+// and the paid-operation confirmation policy together, meant to be read once
+// when an agent session starts, before it attempts any paid or destructive
+// operation.
+export function mainnetBanner(): string {
+  const banner = formatMainnetBanner({
+    stellarNetwork: STELLAR_NETWORK,
+    x402Network: NETWORK,
+    registryContractId: REGISTRY_CONTRACT_ID,
+    allowMainnetEnv: mainnetAllowedFromEnv(),
+  });
+  return [banner, "", formatPaidConfirmationDiagnostics()].join("\n");
+}
+
 const API_MUTATION_TOOLS = new Set([
   "mindvault_register",
   "mindvault_publish",
@@ -567,6 +680,7 @@ async function importWallet(args: {
   if (persist) {
     activeProfileName = target;
     activeProfile().wallet = { publicKey, secretKey };
+    bindActiveProfileToNetwork();
     saveState();
     return {
       text: [
@@ -723,6 +837,44 @@ function requireWallet(): AgentWallet {
   return wallet;
 }
 
+/**
+ * Normalize a metadata pointer string before writing it to the vault registry.
+ *
+ * HTTP(S) URL pointers are normalized the same way `hashLinkResource` on the
+ * server normalizes external URLs at publish time (see
+ * `server/src/utils/crypto.ts`):
+ *
+ *   - Lowercase scheme + host
+ *   - Strip trailing slash from pathname (unless the pathname is exactly "/")
+ *   - Sort query parameters alphabetically
+ *
+ * This ensures a pointer like `https://example.com/metadata.json/` produced by
+ * an update call is identical on-chain to the `https://example.com/metadata.json`
+ * form used at publish, so content-hash comparisons across the two operations
+ * remain consistent.
+ *
+ * Non-HTTP(S) schemes (ipfs://, ar://, sha256:, 0x…) are passed through
+ * unchanged — their syntax is scheme-specific and we must not mutate them.
+ */
+export function normalizeMetadataPointer(pointer: string): string {
+  const trimmed = pointer.trim();
+  if (!/^https?:\/\//i.test(trimmed)) {
+    return trimmed;
+  }
+  try {
+    const u = new URL(trimmed);
+    u.hostname = u.hostname.toLowerCase();
+    u.pathname = u.pathname.replace(/\/+$/, "") || "/";
+    const sorted = Array.from(u.searchParams.entries()).sort(([a], [b]) => a.localeCompare(b));
+    u.search = "";
+    sorted.forEach(([k, v]) => u.searchParams.append(k, v));
+    return u.toString();
+  } catch {
+    // Malformed URL — return as-is and let the contract validation reject it.
+    return trimmed;
+  }
+}
+
 function publisherCredential(profile: string = activeProfileName): CredentialContext {
   return { kind: "publisher_api_key", profile };
 }
@@ -824,10 +976,26 @@ async function getBalanceDetails(publicKey: string): Promise<BalanceDetails> {
     };
   }
 
+  // Horizon sends a decimal string; the balance is tagged with that encoding
+  // and normalized once, so the number this status is decided from can never be
+  // a stroop count read as decimal USDC (#838).
   const usdc = usdcBalance.balance ?? "0";
-  const usdcFloat = parseFloat(usdc);
+  const normalized = normalizeUsdcBalance({ source: "horizon", balance: usdc });
 
-  if (usdcFloat === 0) {
+  if (normalized === null) {
+    return {
+      status: "zero",
+      xlmBalance: xlm,
+      xlmReserve: reserve.toFixed(1),
+      xlmAvailable: available.toFixed(7),
+      usdcBalance: "0",
+      message:
+        `Horizon reported a USDC balance this server could not read ("${String(usdc).slice(0, 32)}"), ` +
+        `so it is treated as zero rather than guessed at. Re-run mindvault_wallet_info; if it persists, the Horizon endpoint is returning an unexpected balance format.`,
+    };
+  }
+
+  if (toStroops(normalized) === 0n) {
     return {
       status: "zero",
       xlmBalance: xlm,
@@ -879,6 +1047,10 @@ async function getAccountBalances(
 }
 
 function formatResource(r: any): string {
+  const tags = Array.isArray(r.tags) && r.tags.length > 0 ? `\n  Tags: ${r.tags.join(", ")}` : "";
+  if (tags) {
+    return `[${r.id}] ${r.title} - $${r.price} USDC\n  ${r.description ?? ""}${tags}\n  ${r.accessUrl}`;
+  }
   return `[${r.id}] ${r.title} — $${r.price} USDC\n  ${r.description ?? ""}\n  ${r.accessUrl}`;
 }
 
@@ -888,6 +1060,7 @@ function catalogItemStructured(r: any): {
   price: string | number | null;
   description: string | null;
   accessUrl: string | null;
+  tags: string[];
 } {
   return {
     id: r?.id ?? null,
@@ -895,6 +1068,7 @@ function catalogItemStructured(r: any): {
     price: r?.price ?? null,
     description: r?.description ?? null,
     accessUrl: r?.accessUrl ?? null,
+    tags: Array.isArray(r?.tags) ? r.tags.filter((tag: unknown) => typeof tag === "string") : [],
   };
 }
 
@@ -921,14 +1095,28 @@ async function insufficientFundsMessage(
   const need = typeof amountNeeded === "number" ? amountNeeded : parseFloat(amountNeeded);
   if (!Number.isFinite(need)) return null;
   const balance = await getUsdcBalance(wallet.publicKey);
-  const have = parseFloat(balance);
-  if (!Number.isFinite(have) || have >= need) return null;
-  const shortfall = need - have;
+
+  // Compared in stroops rather than floats, so the decision to spend never
+  // depends on binary rounding, and an amount that cannot be parsed blocks the
+  // payment instead of reading as "enough" (#838).
+  const needAmount = need.toFixed(7);
+  const comparison = compareUsdc(balance, needAmount);
+  if (comparison === null) {
+    return [
+      `Cannot confirm the USDC balance before paying to ${action}.`,
+      `Amount needed: ${trimUsdc(needAmount)} USDC`,
+      `Reported balance: "${String(balance).slice(0, 32)}" could not be read as a USDC amount.`,
+      `No payment was submitted. Check the wallet with mindvault_wallet_info and retry.`,
+    ].join("\n");
+  }
+  if (comparison >= 0) return null;
+
+  const shortfallStroops = (toStroops(needAmount) ?? 0n) - (toStroops(balance) ?? 0n);
   return [
     `Insufficient USDC to ${action}.`,
-    `Amount needed: ${need} USDC`,
-    `Current balance: ${have} USDC`,
-    `Shortfall: ${shortfall.toFixed(7).replace(/\.?0+$/, "")} USDC`,
+    `Amount needed: ${trimUsdc(needAmount)} USDC`,
+    `Current balance: ${trimUsdc(balance)} USDC`,
+    `Shortfall: ${trimUsdc(stroopsToUsdc(shortfallStroops))} USDC`,
     `Fund ${wallet.publicKey} with the shortfall and retry.`,
   ].join("\n");
 }
@@ -997,6 +1185,53 @@ export async function txStatus(txHash: string): Promise<string> {
   );
 }
 
+/**
+ * One `getTransaction` round trip shaped for settlement polling (#888). The
+ * non-terminal statuses (`NOT_FOUND`, `IN_PROGRESS`, `UNKNOWN`) come back as-is
+ * so the poller can decide when a wait window is exhausted.
+ */
+async function fetchTransactionLookup(txHash: string): Promise<TransactionLookup> {
+  const res = await sorobanRpcFetch(
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "getTransaction",
+        params: { hash: txHash },
+      }),
+    },
+    "POST soroban getTransaction",
+  );
+  if (!res.ok)
+    throwHttpError({
+      operation: `Soroban RPC error: ${res.status}`,
+      source: "soroban",
+      status: res.status,
+      data: await res.text().catch(() => null),
+    });
+  const data: any = await res.json();
+  if (data.error)
+    throw mcpError(
+      mapRegistryError({
+        operation: "RPC error",
+        message: JSON.stringify(data.error),
+        source: "soroban",
+      }),
+    );
+  const tx = data.result;
+  const status = typeof tx?.status === "string" ? tx.status : "UNKNOWN";
+  return {
+    hash: txHash,
+    found: status !== "NOT_FOUND",
+    status,
+    ledger: typeof tx?.ledger === "number" ? tx.ledger : null,
+    ledgerCloseTime:
+      typeof tx?.createdAt === "number" ? new Date(tx.createdAt * 1000).toISOString() : null,
+  };
+}
+
 // ── Tool handlers ─────────────────────────────────────────────────────────────
 
 function hasPublicErrorDetail(data: unknown): boolean {
@@ -1014,6 +1249,17 @@ function sponsoredAccountErrorData(status: number, data: unknown): unknown {
     return { message: "internal service error" };
   }
   return data;
+}
+
+/**
+ * Stellar key derivation for the wallet integrity checks, loaded on demand.
+ *
+ * The SDK import is deferred — as `mindvault_import_wallet` already does — so
+ * the full Stellar SDK stays off the server's startup path.
+ */
+async function stellarDerivePublicKey(): Promise<DerivePublicKey> {
+  const { Keypair } = await import("@stellar/stellar-sdk");
+  return (secretKey: string) => Keypair.fromSecret(secretKey).publicKey();
 }
 
 async function setupWallet(profileArg?: string): Promise<ToolOutcome> {
@@ -1042,25 +1288,78 @@ async function setupWallet(profileArg?: string): Promise<ToolOutcome> {
       }),
     );
   }
+  // A 200 is not proof the service completed: a half-finished creation can
+  // answer with an address whose secret is missing or belongs to a different
+  // account. Persisting that gives the agent a funded address it cannot sign
+  // for, which every later tool then reports as a healthy wallet (#839).
+  const integrity = checkWalletIntegrity(res.data ?? {}, await stellarDerivePublicKey());
+  if (!integrity.ok) {
+    throw sponsoredWalletIntegrityError(integrity, sanitizeServiceUrl(SPONSORED_ACCOUNT_URL));
+  }
+
   activeProfileName = target;
-  activeProfile().wallet = { publicKey: res.data.publicKey, secretKey: res.data.secretKey };
-  saveState();
+  activeProfile().wallet = { publicKey: integrity.publicKey, secretKey: integrity.secretKey };
+  const persisted = saveState();
   const text = [
     `Wallet created.`,
     `Profile: ${target}`,
-    `Address: ${res.data.publicKey}`,
-    `Wallet persisted to ${STATE_FILE} (mode 0600).`,
+    `Address: ${integrity.publicKey}`,
+    persisted
+      ? `Wallet persisted to ${STATE_FILE} (mode 0600).`
+      : `⚠ Wallet held in memory only — writing ${STATE_FILE} failed, so it is lost when this server stops. ` +
+        `Back it up now with mindvault_backup_state, then fix the state directory's permissions.`,
   ].join("\n");
   return {
     text,
-    structured: { profile: target, address: res.data.publicKey, persisted: true },
+    structured: { profile: target, address: integrity.publicKey, persisted },
   };
+}
+
+async function repairSponsoredAccount(secretKey: string, profileArg?: string): Promise<string> {
+  const target = resolveProfileName(profileArg);
+  const { Keypair } = await import("@stellar/stellar-sdk");
+  const publicKey = Keypair.fromSecret(secretKey).publicKey();
+  const details = await getBalanceDetails(publicKey);
+
+  if (details.status === "missing") {
+    throw new Error(
+      `Sponsored-account repair stopped: ${publicKey} does not exist on the configured Stellar network. Retry mindvault_setup_wallet; no local key was changed.`,
+    );
+  }
+
+  activeProfileName = target;
+  activeProfile().wallet = { publicKey, secretKey };
+  saveState();
+  return JSON.stringify(
+    {
+      status: "repaired",
+      profile: target,
+      address: publicKey,
+      accountStatus: details.status,
+      xlmBalance: details.xlmBalance,
+      usdcBalance: details.usdcBalance,
+      persisted: true,
+      message:
+        details.status === "no-trustline"
+          ? "Wallet key restored, but the sponsored account still needs a USDC trustline."
+          : "Wallet key restored after confirming the sponsored account on Horizon.",
+    },
+    null,
+    2,
+  );
 }
 
 async function walletInfoOutcome(): Promise<ToolOutcome> {
   const wallet = requireWallet();
   const details = await getBalanceDetails(wallet.publicKey);
   const publisherRegistered = !!currentApiKey();
+
+  // A stored keypair can name an address this agent cannot sign for — a
+  // half-completed sponsored creation, a hand-edited state file, a restored
+  // backup from another profile. The balance below is real either way, so say
+  // plainly when it is not spendable rather than letting it read as funds (#839).
+  const integrity = checkWalletIntegrity(wallet, await stellarDerivePublicKey());
+  const ownsAddress = integrity.ok;
 
   const lines = [
     `Profile: ${activeProfileName}`,
@@ -1072,6 +1371,10 @@ async function walletInfoOutcome(): Promise<ToolOutcome> {
     `USDC Status: ${details.status}`,
     `Publisher registered: ${publisherRegistered ? "yes" : "no"}`,
   ];
+
+  if (!ownsAddress) {
+    lines.push(`⚠ Keystore: ${unownedWalletNote(integrity)}`);
+  }
 
   if (details.message) {
     lines.push(`Note: ${details.message}`);
@@ -1088,6 +1391,8 @@ async function walletInfoOutcome(): Promise<ToolOutcome> {
       usdcBalance: details.usdcBalance,
       usdcStatus: details.status,
       publisherRegistered,
+      /** False when the stored secret does not derive this address (#839). */
+      ownsAddress,
       note: details.message ?? null,
     },
   };
@@ -1095,6 +1400,273 @@ async function walletInfoOutcome(): Promise<ToolOutcome> {
 
 export async function walletInfo(): Promise<string> {
   return outcomeText(await walletInfoOutcome());
+}
+
+// ── Wallet balances (#889) ───────────────────────────────────────────────────
+
+const STELLAR_PUBLIC_KEY_PATTERN = /^G[A-Z2-7]{55}$/;
+
+interface WalletBalanceRow {
+  profile?: string;
+  active?: boolean;
+  publisherRegistered?: boolean;
+  address: string;
+  details: BalanceDetails | null;
+  note: string | null;
+}
+
+async function loadBalanceRow(input: {
+  address: string;
+  profile?: string;
+  active?: boolean;
+  publisherRegistered?: boolean;
+}): Promise<WalletBalanceRow> {
+  if (!input.address || !STELLAR_PUBLIC_KEY_PATTERN.test(input.address)) {
+    return {
+      ...input,
+      address: input.address,
+      details: null,
+      note: "Address does not look like a Stellar public key (G…, 56 chars).",
+    };
+  }
+  try {
+    return {
+      ...input,
+      address: input.address,
+      details: await getBalanceDetails(input.address),
+      note: null,
+    };
+  } catch (err) {
+    return {
+      ...input,
+      address: input.address,
+      details: null,
+      note: `Balance lookup failed: ${safeErrorMessage(err)}`,
+    };
+  }
+}
+
+function trimDecimalZeros(value: string): string {
+  if (!value.includes(".")) return value;
+  return value.replace(/0+$/, "").replace(/\.$/, "");
+}
+
+function sumBalances(values: string[]): string {
+  const total = values.reduce((sum, value) => sum + (parseFloat(value) || 0), 0);
+  return trimDecimalZeros(total.toFixed(7));
+}
+
+function balanceRowStructured(row: WalletBalanceRow): Record<string, unknown> {
+  return {
+    profile: row.profile ?? null,
+    address: row.address,
+    active: row.active ?? null,
+    publisherRegistered: row.publisherRegistered ?? null,
+    xlmBalance: row.details?.xlmBalance ?? null,
+    xlmReserve: row.details?.xlmReserve ?? null,
+    xlmAvailable: row.details?.xlmAvailable ?? null,
+    usdcBalance: row.details?.usdcBalance ?? null,
+    usdcStatus: row.details?.status ?? null,
+    note: row.note,
+  };
+}
+
+/**
+ * Balances for every agent wallet plus the platform wallet (from
+ * PLATFORM_WALLET_ADDRESS, when configured). One wallet failing to load does
+ * not fail the tool: its row carries a note and the rest of the list stands.
+ */
+async function walletBalancesOutcome(): Promise<ToolOutcome> {
+  const agentNames = Object.entries(profiles)
+    .filter(([, profile]) => !!profile.wallet?.publicKey)
+    .map(([name]) => name)
+    .sort();
+
+  const agents = await Promise.all(
+    agentNames.map((name) =>
+      loadBalanceRow({
+        address: profiles[name].wallet?.publicKey ?? "",
+        profile: name,
+        active: name === activeProfileName,
+        publisherRegistered: profiles[name].apiKey != null,
+      }),
+    ),
+  );
+
+  const platformAddress = PLATFORM_WALLET_ADDRESS?.trim() || null;
+  const platform = platformAddress ? await loadBalanceRow({ address: platformAddress }) : null;
+
+  const usdcTotal = sumBalances(
+    [...agents, ...(platform ? [platform] : [])]
+      .filter((row) => row.details?.usdcBalance)
+      .map((row) => row.details!.usdcBalance),
+  );
+  const xlmTotal = sumBalances(
+    [...agents, ...(platform ? [platform] : [])]
+      .filter((row) => row.details?.xlmBalance)
+      .map((row) => row.details!.xlmBalance),
+  );
+
+  const lines: Array<string | null> = ["Wallet balances", `Horizon: ${HORIZON_URL}`];
+
+  if (platform) {
+    const d = platform.details;
+    lines.push(
+      `Platform (PLATFORM_WALLET_ADDRESS): ${platform.address}`,
+      d
+        ? `  XLM ${d.xlmBalance} (available ${d.xlmAvailable}) · USDC ${d.usdcBalance} (${d.status})`
+        : `  ${platform.note ?? "unavailable"}`,
+    );
+  } else {
+    lines.push("Platform wallet: not configured (set PLATFORM_WALLET_ADDRESS).");
+  }
+
+  lines.push(
+    agents.length > 0 ? `Agent wallets (${agents.length}):` : "Agent wallets: none configured.",
+  );
+  for (const row of agents) {
+    const active = row.active ? " [active]" : "";
+    if (row.details) {
+      lines.push(
+        `  - ${row.profile}${active}: ${row.address}`,
+        `      XLM ${row.details.xlmBalance} (available ${row.details.xlmAvailable}) · USDC ${row.details.usdcBalance} (${row.details.status})`,
+        row.note ? `      Note: ${row.note}` : null,
+      );
+    } else {
+      lines.push(`  - ${row.profile}${active}: ${row.address} — ${row.note ?? "unavailable"}`);
+    }
+  }
+  lines.push(`Totals (unique wallets): USDC ${usdcTotal} · XLM ${xlmTotal}`);
+  lines.push(
+    "Publisher payout target on the server is PAY_TO; this list mirrors the agent wallets and PLATFORM_WALLET_ADDRESS.",
+  );
+
+  return {
+    text: lines.filter((line) => line !== null).join("\n"),
+    structured: {
+      source: "horizon",
+      requestedAt: new Date().toISOString(),
+      platform: platform
+        ? {
+            configured: true,
+            ...balanceRowStructured(platform),
+          }
+        : null,
+      agents: agents.map((row) => balanceRowStructured(row)),
+      count: agents.length,
+      statistics: { totalUsdc: usdcTotal, totalXlm: xlmTotal },
+      message:
+        agents.length > 0
+          ? `Listed ${agents.length} agent wallet(s).`
+          : "No agent wallets configured.",
+    },
+  };
+}
+
+// ── Server endpoints (#890) ──────────────────────────────────────────────────
+
+const HTTP_METHOD_ORDER = ["get", "post", "put", "patch", "delete"];
+
+function methodIndex(method: string): number {
+  const index = HTTP_METHOD_ORDER.indexOf(method);
+  return index === -1 ? HTTP_METHOD_ORDER.length : index;
+}
+
+/**
+ * Surface the MindVault HTTP API's endpoints from its published OpenAPI spec
+ * (`${BASE_URL}/openapi.json`), so an agent can discover what the server
+ * exposes without guessing paths. Read-only and network-only.
+ */
+async function serverEndpointsOutcome(): Promise<ToolOutcome> {
+  const res = await jsonFetch(`${BASE_URL}/openapi.json`);
+  if (!res.ok)
+    throwHttpError({
+      operation: "OpenAPI spec fetch failed",
+      source: "api",
+      status: res.status,
+      data: res.data,
+    });
+  const spec =
+    res.data && typeof res.data === "object" && !Array.isArray(res.data)
+      ? (res.data as Record<string, any>)
+      : null;
+  const paths =
+    spec?.paths && typeof spec.paths === "object" ? (spec.paths as Record<string, any>) : {};
+
+  const operations: Array<{
+    method: string;
+    path: string;
+    operationId: string | null;
+    tags: string[];
+    summary: string | null;
+  }> = [];
+  for (const [path, item] of Object.entries(paths)) {
+    if (!item || typeof item !== "object") continue;
+    for (const [method, op] of Object.entries(item as Record<string, unknown>)) {
+      if (typeof op !== "object" || op === null) continue;
+      const operation = op as Record<string, unknown>;
+      operations.push({
+        method: method.toUpperCase(),
+        path,
+        operationId: typeof operation.operationId === "string" ? operation.operationId : null,
+        tags: Array.isArray(operation.tags)
+          ? (operation.tags as unknown[]).filter((tag): tag is string => typeof tag === "string")
+          : [],
+        summary: typeof operation.summary === "string" ? operation.summary : null,
+      });
+    }
+  }
+  operations.sort(
+    (a, b) =>
+      a.path.localeCompare(b.path) ||
+      methodIndex(a.method.toLowerCase()) - methodIndex(b.method.toLowerCase()),
+  );
+
+  const info =
+    spec && typeof spec.info === "object" ? (spec.info as Record<string, unknown>) : null;
+  const serverName = info && typeof info.title === "string" ? info.title : null;
+  const openapiVersion =
+    typeof spec?.openapi === "string"
+      ? spec.openapi
+      : typeof spec?.swagger === "string"
+        ? spec.swagger
+        : null;
+
+  const uniquePaths = [...new Set(operations.map((op) => op.path))].sort((a, b) =>
+    a.localeCompare(b),
+  );
+
+  return {
+    text: [
+      "Server endpoints",
+      `Base URL: ${BASE_URL}`,
+      `Source: OpenAPI spec (${openapiVersion ?? "unknown"})${serverName ? ` — ${serverName}` : ""}`,
+      `Endpoints: ${operations.length}`,
+      ...operations.map((op) => {
+        const id = op.operationId ? ` (${op.operationId})` : "";
+        const summary = op.summary ? ` — ${op.summary}` : "";
+        const tags = op.tags.length > 0 ? ` [${op.tags.join(", ")}]` : "";
+        return `  ${op.method.padEnd(6)} ${op.path}${tags}${id}${summary}`;
+      }),
+      operations.length === 0 ? "No parseable operations found in the published spec." : null,
+      "Reflects the deployment configured by MINDVAULT_URL; for discovery only.",
+    ]
+      .filter((line): line is string => line !== null)
+      .join("\n"),
+    structured: {
+      source: "openapi",
+      baseUrl: BASE_URL,
+      openapi: openapiVersion,
+      server: info,
+      endpointCount: operations.length,
+      operations,
+      paths: uniquePaths,
+      message:
+        operations.length > 0
+          ? `Discovered ${operations.length} endpoint(s) across ${uniquePaths.length} path(s) from ${BASE_URL}/openapi.json.`
+          : "No operations could be parsed from the published OpenAPI spec.",
+    },
+  };
 }
 
 /** Switch the active profile, creating it if new. */
@@ -1131,6 +1703,20 @@ export function useProfile(nameArg: string): string {
   return outcomeText(useProfileOutcome(nameArg));
 }
 
+export function switchNetworkProfile(name: string, network: "testnet" | "mainnet"): string {
+  if (!isValidProfileName(name)) throw new Error("Invalid profile name.");
+  activeProfileName = name;
+  activeProfile().network = network;
+  applyNetworkConfig(network);
+  saveState();
+  const verification = verifyInstall({ ...process.env, STELLAR_NETWORK: network });
+  return JSON.stringify(
+    { profile: name, network, verification: { ok: verification.ok, checks: verification.checks } },
+    null,
+    2,
+  );
+}
+
 /** List every named profile, marking the active one. Secrets are never shown. */
 function listProfilesOutcome(): ToolOutcome {
   const names = Object.keys(profiles).sort();
@@ -1159,46 +1745,76 @@ function listProfilesOutcome(): ToolOutcome {
   return { text: [`Profiles (* = active):`, ...lines].join("\n"), structured };
 }
 
-interface CatalogLoad {
-  items: any[];
-  /** Notice appended to the output. Fresh reads use the server cache headers; offline reads use the snapshot-age label. */
-  notice: string | null;
-  /** True when the catalog was served from the offline snapshot rather than the live API. */
-  fromCache: boolean;
+export function listProfiles(): string {
+  return outcomeText(listProfilesOutcome());
 }
 
 /**
- * Fetch the catalog resource array, recording a snapshot on success and falling
- * back to the last snapshot on transport failure (#556). A reachable-but-error
- * response is surfaced verbatim — the cache is only for the unreachable case.
+ * Whether a failed catalog read should fall back to the offline snapshot (#837).
+ *
+ * The cache exists for one situation: the catalog could not answer. A transport
+ * failure is that situation, and so is a transient server or throttling status
+ * once the retry layer has exhausted its attempts — `jsonFetch` already replays
+ * idempotent GETs on 408/425/429/5xx, so reaching this point means the gateway
+ * stayed broken.
+ *
+ * Everything else is the service answering, and answering about *this request*:
+ * a 400 on a malformed filter, a 404, a 401. Serving a snapshot for those hides
+ * a fixable client error behind stale data labelled "API unreachable", and the
+ * agent repeats the bad request against a cache that will never reflect it. So
+ * those propagate.
  */
-async function loadCatalog(url: string, operation: string): Promise<CatalogLoad> {
-  let res;
-  try {
-    res = await jsonFetch(url);
-  } catch (err) {
-    const snapshot = getCatalogSnapshot();
-    // No cached snapshot — surface the original deterministic error from jsonFetch.
-    if (!snapshot) throw err;
-    return {
-      items: Array.isArray(snapshot.resources) ? (snapshot.resources as any[]) : [],
-      notice: catalogCacheLabel(snapshot.savedAtMs),
-      fromCache: true,
-    };
+function catalogFallbackFor(err: unknown): CatalogFallbackReason | null {
+  const mapped = mappedErrorOf(err);
+  if (!mapped) return { kind: "unreachable" };
+  if (mapped.status === undefined) {
+    // Transport-level: classified as network or timeout, never a status.
+    return mapped.category === "network" || mapped.category === "timeout"
+      ? { kind: "unreachable" }
+      : null;
   }
-  if (!res.ok) {
-    throw mcpError(mapHttpError({ operation, source: "api", status: res.status, data: res.data }));
-  }
-  const items = Array.isArray(res.data) ? res.data : [];
-  recordCatalogSnapshot(items);
-  return { items, notice: cacheStalenessNotice(res.headers), fromCache: false };
+  return isRetryableStatus(mapped.status) ? { kind: "status", status: mapped.status } : null;
 }
 
-export async function browse(filters: CatalogFilters = {}): Promise<string> {
+/** Resolve a failed catalog read to a snapshot, or rethrow when it must surface. */
+function catalogSnapshotFor(err: unknown): { resources: unknown[]; notice: string } | null {
+  const reason = catalogFallbackFor(err);
+  if (!reason) return null;
+  const snapshot = getCatalogSnapshot();
+  if (!snapshot) return null;
+  return {
+    resources: snapshot.resources,
+    notice: catalogCacheLabel(snapshot.savedAtMs, Date.now(), reason),
+  };
+}
+
+async function browseOutcome(filters: CatalogFilters = {}): Promise<ToolOutcome> {
   const qs = buildCatalogQueryString(filters);
   const url = qs ? `${BASE_URL}/resources?${qs}` : `${BASE_URL}/resources`;
-  const { items: raw, notice } = await loadCatalog(url, "Browse failed");
-  const items = applyCatalogSort(applyClientCatalogFilters(raw, filters), filters.sort);
+  let raw: any[] = [];
+  let notice: string | null = null;
+  try {
+    const res = await jsonFetch(url);
+    if (!res.ok) {
+      throw mcpError(
+        mapHttpError({
+          operation: "Browse failed",
+          source: "api",
+          status: res.status,
+          data: res.data,
+        }),
+      );
+    }
+    raw = Array.isArray(res.data) ? res.data : [];
+    recordCatalogSnapshot(raw);
+    notice = cacheStalenessNotice(res.headers);
+  } catch (err) {
+    const fallback = catalogSnapshotFor(err);
+    if (!fallback) throw err;
+    raw = Array.isArray(fallback.resources) ? (fallback.resources as any[]) : [];
+    notice = fallback.notice;
+  }
+  const items: any[] = applyCatalogSort(applyClientCatalogFilters(raw, filters), filters.sort);
   const body =
     items.length === 0
       ? filters.query ||
@@ -1212,10 +1828,7 @@ export async function browse(filters: CatalogFilters = {}): Promise<string> {
         ? `No resources match ${describeCatalogFilters(filters)}.`
         : "No resources listed yet."
       : items.map(formatResource).join("\n\n");
-  // Warn when the catalog may be stale relative to the on-chain registry, based
-  // on the server's cache headers. Silent when there is no cache metadata.
-  const full = notice ? `${body}\n\n${notice}` : body;
-  return truncateResponse(full);
+  return catalogOutcome(items, body, notice);
 }
 
 export async function browse(filters: CatalogFilters = {}): Promise<string> {
@@ -1245,19 +1858,50 @@ async function searchOutcome(filtersOrQuery: string | CatalogFilters): Promise<T
 
   const qs = buildCatalogQueryString(filters);
   const url = qs ? `${BASE_URL}/resources?${qs}` : `${BASE_URL}/resources`;
-  const { items: raw, notice, fromCache } = await loadCatalog(url, "Search failed");
+  let raw: any[] = [];
+  let notice: string | null = null;
+  try {
+    const res = await jsonFetch(url);
+    if (!res.ok) {
+      throw mcpError(
+        mapHttpError({
+          operation: "Search failed",
+          source: "api",
+          status: res.status,
+          data: res.data,
+        }),
+      );
+    }
+    raw = Array.isArray(res.data) ? res.data : [];
+    recordCatalogSnapshot(raw);
+    notice = cacheStalenessNotice(res.headers);
+  } catch (err) {
+    const fallback = catalogSnapshotFor(err);
+    if (!fallback) throw err;
+    raw = Array.isArray(fallback.resources) ? (fallback.resources as any[]) : [];
+    notice = fallback.notice;
+  }
+
   // Client-side keyword / tags / listed / skipped for unit-test compatibility
   // and parity with fields the public catalog schema does not accept.
   const items = applyCatalogSort(applyClientCatalogFilters(raw, filters), filters.sort);
 
-  if (items.length === 0) return `No resources match ${describeCatalogFilters(filters)}.`;
-  const body = items.map(formatResource).join("\n\n");
-  // Search never appended a server cache-staleness notice; only the explicit
-  // offline-snapshot label is added here, so fresh-search output is unchanged.
-  const full = fromCache && notice ? `${body}\n\n${notice}` : body;
-  return truncateResponse(full);
+  if (items.length === 0) {
+    return catalogOutcome([], `No resources match ${describeCatalogFilters(filters)}.`, notice);
+  }
+  return catalogOutcome(items, items.map(formatResource).join("\n\n"), notice);
 }
 
+export async function search(filtersOrQuery: string | CatalogFilters): Promise<string> {
+  return outcomeText(await searchOutcome(filtersOrQuery));
+}
+
+/**
+ * Fetch one resource's public metadata, recording a snapshot on success and
+ * falling back to the last snapshot on transport failure (#556). A
+ * reachable-but-error response is surfaced verbatim — the cache only covers the
+ * unreachable case.
+ */
 async function previewData(resourceId: string): Promise<{ r: any; label: string | null }> {
   try {
     const res = await jsonFetch(`${BASE_URL}/resources/${resourceId}/meta`);
@@ -1271,16 +1915,20 @@ async function previewData(resourceId: string): Promise<{ r: any; label: string 
     recordPreviewSnapshot(resourceId, res.data);
     return { r: res.data, label: null };
   } catch (err) {
-    const snap = getPreviewSnapshot(resourceId);
-    // No cached snapshot for this resource — surface the original error.
-    if (!snap) throw err;
-    return { r: snap.meta as any, label: catalogCacheLabel(snap.savedAtMs) };
+    // Same rule as browse/search: a snapshot answers for a catalog that could
+    // not answer, never for a 404 on an id the agent got wrong (#837).
+    const reason = catalogFallbackFor(err);
+    const snap = reason ? getPreviewSnapshot(resourceId) : null;
+    if (!snap || !reason) throw err;
+    return { r: snap.meta as any, label: catalogCacheLabel(snap.savedAtMs, Date.now(), reason) };
   }
 }
 
 export async function preview(resourceId: string): Promise<string> {
   const { r, label } = await previewData(resourceId);
-  const out: Record<string, unknown> = {
+  // Publisher-supplied title/description are unbounded at the source, so cap
+  // them before serializing rather than truncating the JSON afterwards (#582).
+  const out: Record<string, unknown> = applyPreviewLimits({
     id: r.id,
     title: r.title,
     description: r.description,
@@ -1288,9 +1936,9 @@ export async function preview(resourceId: string): Promise<string> {
     type: r.resourceType,
     verificationStatus: r.verificationStatus,
     accessUrl: r.accessUrl,
-  };
+  });
   if (label) out.offlineCache = label;
-  return JSON.stringify(out, null, 2);
+  return serializePreview(out);
 }
 
 async function fetchPublishStatusData(resourceId: string): Promise<PublishStatusFetch> {
@@ -1364,6 +2012,40 @@ export async function publishStatus(
     attempts,
     timedOut,
   });
+  return JSON.stringify(snapshot, null, 2);
+}
+
+export async function subscribeResourceHandler(
+  args: {
+    resourceId?: string;
+    wait?: unknown;
+    timeoutMs?: unknown;
+    intervalMs?: unknown;
+  },
+  onProgress?: ResourceProgressReporter,
+): Promise<string> {
+  const resourceId = (args.resourceId ?? "").trim();
+  if (!resourceId) {
+    throw new Error(
+      "resourceId is required. Pass the id from mindvault_browse, mindvault_search, or mindvault_preview (e.g. 'cm7x8y9z').",
+    );
+  }
+
+  const wait = normalizeResourceWaitFlag(args.wait);
+  const timeoutMs = normalizeResourceTimeoutMs(args.timeoutMs);
+  const intervalMs = normalizeResourceIntervalMs(args.intervalMs);
+
+  const snapshot: ResourceSubscriptionSnapshot = await subscribeResource(
+    {
+      resourceId,
+      wait,
+      timeoutMs,
+      intervalMs,
+      sleep: sleepMs,
+    },
+    onProgress,
+  );
+
   return JSON.stringify(snapshot, null, 2);
 }
 
@@ -1527,6 +2209,15 @@ async function publish(args: {
     failureGuidance: failureGuidance.length > 0 ? failureGuidance : null,
   };
 
+  recordResourceHistory({
+    resourceId: resource.id,
+    kind: "created",
+    actor: currentWallet()?.publicKey,
+    value: resource.price,
+    txHash: onchainTxHash,
+    network: NETWORK,
+  });
+
   return JSON.stringify(summary, null, 2);
 }
 
@@ -1536,6 +2227,9 @@ export async function buy(
   estimatedPrice?: string | null,
   onProgress?: (progress: number, total?: number, message?: string) => Promise<void>,
   maxAutoPayUsdc?: string,
+  wait?: unknown,
+  timeoutMs?: unknown,
+  intervalMs?: unknown,
 ): Promise<string> {
   if (dryRun) {
     return JSON.stringify(
@@ -1613,8 +2307,59 @@ export async function buy(
       receiptRef: receipt?.paymentId != null ? String(receipt.paymentId) : null,
       ...(title ? { title } : {}),
     });
+    recordResourceHistory({
+      resourceId,
+      kind: "purchased",
+      actor: wallet.publicKey,
+      recipient: receipt?.paidTo != null ? String(receipt.paidTo) : undefined,
+      amount,
+      txHash,
+      network: NETWORK,
+    });
   } catch (err) {
-    console.error("MindVault MCP: failed to persist purchase receipt:", safeErrorMessage(err));
+    logger.error("MindVault MCP: failed to persist purchase receipt:", safeErrorMessage(err));
+  }
+
+  // Settlement confirmation (#888): when the caller passes wait: true we poll
+  // the payment transaction until it settles or the deadline passes. The
+  // progress counter continues after step 3 and stays monotonic while the
+  // poller reports; without wait the counter is untouched and the summary
+  // simply carries an un-polled settlement block.
+  const waitForSettlement = normalizeSettlementWaitFlag(wait);
+  const settleTimeoutMs = normalizeSettlementTimeoutMs(timeoutMs);
+  const settleIntervalMs = normalizeSettlementIntervalMs(intervalMs);
+  let settlement: SettlementSnapshot = buildSettlementSnapshot({
+    txHash,
+    wait: waitForSettlement,
+    skipped: waitForSettlement && !txHash,
+    result: null,
+  });
+  let settleProgressEmitted = 0;
+  let settleProgressTotal = 0;
+
+  if (waitForSettlement && txHash) {
+    const settleSteps = estimateSettlementSteps(true, settleTimeoutMs, settleIntervalMs);
+    settleProgressTotal = settleSteps;
+    await onProgress?.(4, 4 + settleSteps, "Waiting for payment settlement");
+    const result = await pollSettlement({
+      txHash,
+      wait: true,
+      timeoutMs: settleTimeoutMs,
+      intervalMs: settleIntervalMs,
+      fetchTransaction: fetchTransactionLookup,
+      onProgress: async (p, total, message) => {
+        settleProgressEmitted = p;
+        settleProgressTotal = total ?? settleSteps;
+        await onProgress?.(4 + p, 4 + (total ?? settleSteps), message);
+      },
+      sleep: sleepMs,
+    });
+    settlement = buildSettlementSnapshot({
+      txHash,
+      wait: true,
+      skipped: false,
+      result,
+    });
   }
 
   const summary = {
@@ -1625,9 +2370,10 @@ export async function buy(
     },
     changedFields: beforeState ? ["purchased"] : ["id", "title", "price", "accessUrl", "purchased"],
     txHash,
+    settlement,
   };
 
-  await onProgress?.(4, 4, "Done");
+  await onProgress?.(4 + settleProgressEmitted, 4 + settleProgressTotal, "Done");
 
   return JSON.stringify(summary, null, 2);
 }
@@ -1675,6 +2421,7 @@ export async function registerOnchain(
   const { Keypair, Transaction } = await import("@stellar/stellar-sdk");
   const passphrase = networkPassphrase ?? REGISTRY_NETWORK_PASSPHRASE;
   const tx = new Transaction(unsignedXdr, passphrase);
+  assertTransactionFeeWithinCeiling({ feeStroops: tx.fee });
   tx.sign(Keypair.fromSecret(wallet.secretKey));
   const signedXdr = tx.toXDR();
 
@@ -1738,26 +2485,33 @@ async function agentStatus(): Promise<string> {
   return JSON.stringify(res.data, null, 2);
 }
 
-function stroopsToUsdc(stroops: bigint): string {
-  const STROOPS_PER_USDC = 10_000_000n;
-  const negative = stroops < 0n;
-  const abs = negative ? -stroops : stroops;
-  const whole = abs / STROOPS_PER_USDC;
-  const frac = abs % STROOPS_PER_USDC;
-  return `${negative ? "-" : ""}${whole}.${frac.toString().padStart(7, "0")}`;
-}
-
+/**
+ * Decimal USDC for an on-chain stroop amount, throwing on an amount the shared
+ * converter will not accept. The registry contract takes stroops, so a price
+ * that cannot be expressed exactly must stop here rather than be rounded into
+ * a transaction (#838).
+ */
 export function usdcToStroops(usdc: string): bigint {
-  const parts = usdc.split(".");
-  const whole = BigInt(parts[0] || "0");
-  const fracStr = (parts[1] || "").padEnd(7, "0").slice(0, 7);
-  const frac = BigInt(fracStr);
-  return whole * 10_000_000n + frac;
+  const stroops = toStroops(usdc);
+  if (stroops === null) {
+    throw new Error(
+      `Invalid USDC amount "${usdc}". Use a non-negative decimal with at most 7 decimal places, e.g. "5.00".`,
+    );
+  }
+  return stroops;
 }
 
 export async function updateMetadata(resourceId: string, metadata: string): Promise<string> {
   const wallet = requireWallet();
-  if (_isMock()) return mockUpdateMetadata(resourceId, metadata);
+
+  // Normalize the metadata pointer before submitting so that equivalent
+  // HTTP(S) URLs always produce the same on-chain value, matching the
+  // normalization applied at publish time (server/src/utils/crypto.ts
+  // `hashLinkResource`/`normalizeUrl`).  Non-URL pointers (ipfs://, ar://,
+  // sha256:, 0x…) are passed through unchanged.
+  const normalizedMetadata = normalizeMetadataPointer(metadata);
+
+  if (_isMock()) return mockUpdateMetadata(resourceId, normalizedMetadata);
 
   const client = createRegistryClient({
     contractId: REGISTRY_CONTRACT_ID,
@@ -1768,7 +2522,7 @@ export async function updateMetadata(resourceId: string, metadata: string): Prom
 
   let tx: Awaited<ReturnType<typeof client.update_metadata>>;
   try {
-    tx = await client.update_metadata({ id: resourceId, metadata });
+    tx = await client.update_metadata({ id: resourceId, metadata: normalizedMetadata });
   } catch (err: any) {
     if (isTimeoutError(err)) {
       throw mcpError(
@@ -1822,6 +2576,14 @@ export async function updateMetadata(resourceId: string, metadata: string): Prom
   }
 
   const txHash = sentTx?.sendTransactionResponse?.hash ?? null;
+  recordResourceHistory({
+    resourceId,
+    kind: "metadata",
+    actor: wallet.publicKey,
+    value: metadata,
+    txHash,
+    network: NETWORK,
+  });
   return JSON.stringify(
     {
       status: "success",
@@ -1903,6 +2665,14 @@ export async function setPrice(resourceId: string, price: string): Promise<strin
   }
 
   const txHash = sentTx?.sendTransactionResponse?.hash ?? null;
+  recordResourceHistory({
+    resourceId,
+    kind: "price",
+    actor: wallet.publicKey,
+    value: price,
+    txHash,
+    network: NETWORK,
+  });
   return JSON.stringify(
     {
       status: "success",
@@ -1982,6 +2752,14 @@ export async function transferOwnership(resourceId: string, newCreator: string):
   }
 
   const txHash = sentTx?.sendTransactionResponse?.hash ?? null;
+  recordResourceHistory({
+    resourceId,
+    kind: "transferred",
+    actor: wallet.publicKey,
+    recipient: newCreator,
+    txHash,
+    network: NETWORK,
+  });
   return JSON.stringify(
     {
       status: "success",
@@ -2073,9 +2851,9 @@ export async function setListed(resourceId: string, listed: boolean): Promise<st
   );
 }
 
-export async function acceptTransfer(resourceId: string): Promise<string> {
+export async function setTags(resourceId: string, tags: string[]): Promise<string> {
   const wallet = requireWallet();
-  if (_isMock()) return mockAcceptTransfer(resourceId);
+  if (_isMock()) return mockSetTags(resourceId, tags);
 
   const client = createRegistryClient({
     contractId: REGISTRY_CONTRACT_ID,
@@ -2084,14 +2862,14 @@ export async function acceptTransfer(resourceId: string): Promise<string> {
     publicKey: wallet.publicKey,
   });
 
-  let tx: Awaited<ReturnType<typeof client.accept_transfer>>;
+  let tx: Awaited<ReturnType<typeof client.set_tags>>;
   try {
-    tx = await client.accept_transfer({ id: resourceId });
+    tx = await client.set_tags({ id: resourceId, tags });
   } catch (err: any) {
     if (isTimeoutError(err)) {
       throw mcpError(
         mapTransportError({
-          operation: `Accept transfer failed for resource "${resourceId}"`,
+          operation: `Set tags failed for resource "${resourceId}"`,
           source: "soroban",
           error: err,
         }),
@@ -2099,7 +2877,7 @@ export async function acceptTransfer(resourceId: string): Promise<string> {
     }
     throw mcpError(
       mapRegistryError({
-        operation: `Accept transfer failed for resource "${resourceId}"`,
+        operation: `Set tags failed for resource "${resourceId}"`,
         message: err?.message || String(err),
       }),
     );
@@ -2111,7 +2889,7 @@ export async function acceptTransfer(resourceId: string): Promise<string> {
     const notFound = err.message === RegistryErrors[2].message;
     throw mcpError(
       mapRegistryError({
-        operation: `Accept transfer failed for resource "${resourceId}"`,
+        operation: `Set tags failed for resource "${resourceId}"`,
         message: err.message,
         notFound,
       }),
@@ -2133,100 +2911,18 @@ export async function acceptTransfer(resourceId: string): Promise<string> {
   } catch (err: any) {
     throw mcpError(
       mapRegistryError({
-        operation: `Accept transfer submission failed for resource "${resourceId}"`,
+        operation: `Set tags submission failed for resource "${resourceId}"`,
         message: err?.message || String(err),
       }),
     );
   }
 
   const txHash = sentTx?.sendTransactionResponse?.hash ?? null;
-  return JSON.stringify(
-    {
-      status: "success",
-      resourceId,
-      txHash,
-    },
-    null,
-    2,
-  );
-}
-
-export async function cancelTransfer(resourceId: string): Promise<string> {
-  const wallet = requireWallet();
-  if (_isMock()) return mockCancelTransfer(resourceId);
-
-  const client = createRegistryClient({
-    contractId: REGISTRY_CONTRACT_ID,
-    rpcUrl: SOROBAN_RPC_URL,
-    networkPassphrase: REGISTRY_NETWORK_PASSPHRASE,
-    publicKey: wallet.publicKey,
-  });
-
-  let tx: Awaited<ReturnType<typeof client.cancel_transfer>>;
-  try {
-    tx = await client.cancel_transfer({ id: resourceId });
-  } catch (err: any) {
-    if (isTimeoutError(err)) {
-      throw mcpError(
-        mapTransportError({
-          operation: `Cancel transfer failed for resource "${resourceId}"`,
-          source: "soroban",
-          error: err,
-        }),
-      );
-    }
-    throw mcpError(
-      mapRegistryError({
-        operation: `Cancel transfer failed for resource "${resourceId}"`,
-        message: err?.message || String(err),
-      }),
-    );
-  }
-
-  const result = tx.result;
-  if (result.isErr()) {
-    const err = result.unwrapErr();
-    const notFound = err.message === RegistryErrors[2].message;
-    throw mcpError(
-      mapRegistryError({
-        operation: `Cancel transfer failed for resource "${resourceId}"`,
-        message: err.message,
-        notFound,
-      }),
-    );
-  }
-
-  const { Keypair } = await import("@stellar/stellar-sdk");
-  const keypair = Keypair.fromSecret(wallet.secretKey);
-  let sentTx;
-  try {
-    sentTx = await tx.signAndSend({
-      signTransaction: async (xdr: string) => {
-        const { Transaction } = await import("@stellar/stellar-sdk");
-        const stellarTx = new Transaction(xdr, REGISTRY_NETWORK_PASSPHRASE);
-        stellarTx.sign(keypair);
-        return { signedTxXdr: stellarTx.toXDR() };
-      },
-    });
-  } catch (err: any) {
-    throw mcpError(
-      mapRegistryError({
-        operation: `Cancel transfer submission failed for resource "${resourceId}"`,
-        message: err?.message || String(err),
-      }),
-    );
-  }
-
-  const txHash = sentTx?.sendTransactionResponse?.hash ?? null;
-  return JSON.stringify(
-    {
-      status: "success",
-      resourceId,
-      txHash,
-    },
-    null,
-    2,
-  );
+  return [
+    `Tags updated for resource "${resourceId}".`,
+    `Tags: ${tags.length > 0 ? tags.join(", ") : "(none)"}`,
+    `Tx hash: ${txHash ?? "pending"}`,
+  ].join("\n");
 }
 
 export async function registryLookup(resourceId: string): Promise<string> {
@@ -2515,6 +3211,89 @@ export async function registryList(start: number, limit: number): Promise<string
   );
 }
 
+export async function registryCount(creator?: string): Promise<string> {
+  if (_isMock()) return mockRegistryCount(creator, REGISTRY_CONTRACT_ID);
+
+  const client = createRegistryClient({
+    contractId: REGISTRY_CONTRACT_ID,
+    rpcUrl: SOROBAN_RPC_URL,
+    networkPassphrase: REGISTRY_NETWORK_PASSPHRASE,
+  });
+
+  let count: number;
+  let listedCount: number;
+  let creatorCount: number | null = null;
+
+  try {
+    const countTx = await client.count();
+    count = Number(countTx.result);
+  } catch (err: unknown) {
+    throw mcpError(
+      mapTransportError({
+        operation: `Registry count() failed (contract ${REGISTRY_CONTRACT_ID}, RPC ${SOROBAN_RPC_URL})`,
+        source: "soroban",
+        error: err,
+      }),
+    );
+  }
+
+  try {
+    // listed_count is present in the Rust contract but not yet included in the
+    // generated TypeScript bindings; access via `as any` until bindings are
+    // regenerated with `pnpm contract:bindings`.
+    const listedTx = await (client as any).listed_count();
+    listedCount = Number(listedTx.result);
+  } catch (err: unknown) {
+    throw mcpError(
+      mapTransportError({
+        operation: `Registry listed_count() failed (contract ${REGISTRY_CONTRACT_ID}, RPC ${SOROBAN_RPC_URL})`,
+        source: "soroban",
+        error: err,
+      }),
+    );
+  }
+
+  if (creator) {
+    try {
+      const creatorTx = await (client as any).creator_resource_count({ creator });
+      creatorCount = Number(creatorTx.result);
+    } catch (err: unknown) {
+      throw mcpError(
+        mapTransportError({
+          operation: `Registry creator_resource_count() failed for "${creator}" (contract ${REGISTRY_CONTRACT_ID}, RPC ${SOROBAN_RPC_URL})`,
+          source: "soroban",
+          error: err,
+        }),
+      );
+    }
+  }
+
+  const payload: {
+    source: string;
+    count: number;
+    listedCount: number;
+    creatorCount?: number;
+    creator?: string;
+    contract: string;
+    network: string;
+    rpc: string;
+  } = {
+    source: "on-chain",
+    count,
+    listedCount,
+    contract: REGISTRY_CONTRACT_ID,
+    network: REGISTRY_NETWORK_PASSPHRASE,
+    rpc: SOROBAN_RPC_URL,
+  };
+
+  if (creator != null) {
+    payload.creator = creator;
+    payload.creatorCount = creatorCount!;
+  }
+
+  return JSON.stringify(payload, null, 2);
+}
+
 export async function recoverCatalogCache(): Promise<string> {
   if (_isMock()) {
     return JSON.stringify(
@@ -2685,6 +3464,72 @@ export async function checkConsistency(
   return JSON.stringify({ ...report, summary }, null, 2);
 }
 
+export async function verifyAttestation(
+  resourceId: string,
+  attestationHash: string,
+): Promise<string> {
+  const expected = attestationHash.trim();
+  if (!resourceId) throw new Error("resourceId is required.");
+  if (!expected) throw new Error("attestationHash is required.");
+  if (expected.length > 64) throw new Error("attestationHash must be at most 64 characters.");
+
+  if (_isMock()) return mockVerifyAttestation(resourceId, expected, REGISTRY_CONTRACT_ID);
+
+  let registeredAttestationHash: string | null;
+  try {
+    registeredAttestationHash = await getAttestationHash({
+      contractId: REGISTRY_CONTRACT_ID,
+      rpcUrl: SOROBAN_RPC_URL,
+      networkPassphrase: REGISTRY_NETWORK_PASSPHRASE,
+      resourceId,
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (/does not expose get_attestation_hash/.test(message)) {
+      const mapped = mapRegistryError({
+        operation: `Attestation verification failed for resource "${resourceId}"`,
+        message,
+      });
+      throw mcpError({
+        ...mapped,
+        action:
+          "Run mindvault_check_bindings. If get_attestation_hash is missing, point VAULT_REGISTRY_CONTRACT_ID at a deployment that includes it.",
+      });
+    }
+    throw mcpError(
+      mapTransportError({
+        operation: `On-chain attestation lookup failed for resource "${resourceId}" (contract ${REGISTRY_CONTRACT_ID}, RPC ${SOROBAN_RPC_URL})`,
+        source: "soroban",
+        error: err,
+      }),
+    );
+  }
+
+  const matches = registeredAttestationHash !== null && registeredAttestationHash === expected;
+  const summary = matches
+    ? "Attestation hash matches the value registered on-chain."
+    : registeredAttestationHash === null
+      ? "No attestation hash is registered for this resource; it may be missing or have no verifier attestation."
+      : "The supplied attestation hash does not match the value registered on-chain.";
+
+  return JSON.stringify(
+    {
+      source: "on-chain",
+      resourceId,
+      expectedAttestationHash: expected,
+      registeredAttestationHash,
+      matches,
+      verified: matches,
+      summary,
+      contract: REGISTRY_CONTRACT_ID,
+      network: REGISTRY_NETWORK_PASSPHRASE,
+      rpc: SOROBAN_RPC_URL,
+    },
+    null,
+    2,
+  );
+}
+
 /**
  * Report the current Stellar and x402 network configuration in use by this MCP
  * instance. Includes testnet/mainnet selection, RPC/Horizon URLs, registry and
@@ -2743,11 +3588,134 @@ export function networkProfile(): string {
   return JSON.stringify(profile, null, 2);
 }
 
+// ── #883: Client config emitter ──────────────────────────────────────────────
+// docs/mcp-client-configs.md documents copy-paste configs per client with a
+// placeholder path and testnet defaults. This mirrors that content
+// programmatically, pre-filled with this running process's actual entrypoint
+// path and whichever environment values were actually detected (so an agent
+// already connected to one client can generate the config for another without
+// hand-editing placeholders).
+
+type ClientConfigId = "claude-code" | "claude-desktop" | "codex" | "cursor" | "vscode" | "windsurf";
+
+const CLIENT_CONFIG_PROFILES: Record<
+  ClientConfigId,
+  { label: string; format: "json" | "toml"; topLevelKey: "mcpServers" | "servers" }
+> = {
+  "claude-code": { label: "Claude Code (.mcp.json)", format: "json", topLevelKey: "mcpServers" },
+  "claude-desktop": {
+    label: "Claude Desktop (claude_desktop_config.json)",
+    format: "json",
+    topLevelKey: "mcpServers",
+  },
+  codex: { label: "Codex (~/.codex/config.toml)", format: "toml", topLevelKey: "mcpServers" },
+  cursor: { label: "Cursor (.cursor/mcp.json)", format: "json", topLevelKey: "mcpServers" },
+  vscode: { label: "VS Code (.vscode/mcp.json)", format: "json", topLevelKey: "servers" },
+  windsurf: {
+    label: "Windsurf (~/.codeium/windsurf/mcp_config.json)",
+    format: "json",
+    topLevelKey: "mcpServers",
+  },
+};
+
+/**
+ * The path this server was actually launched with, when it looks like a real
+ * built entrypoint (ends in mcp/dist/index.js). Falls back to the same
+ * placeholder the docs use when running under a dev/test harness (tsx,
+ * vitest), where process.argv[1] isn't a useful path to hand back to a client.
+ */
+function detectEntrypointPath(): string {
+  const argv1 = process.argv[1];
+  if (argv1 && /mcp[\\/]dist[\\/]index\.js$/.test(argv1)) return argv1;
+  return "/absolute/path/to/mindvault/mcp/dist/index.js";
+}
+
+/** Non-default environment values worth carrying into a generated config. */
+function detectConfigEnv(): Record<string, string> {
+  const env: Record<string, string> = { STELLAR_NETWORK };
+  const passthrough = [
+    "MINDVAULT_URL",
+    "SPONSORED_ACCOUNT_URL",
+    "SOROBAN_RPC_URL",
+    "HORIZON_URL",
+    "USDC_CONTRACT_ID",
+    "VAULT_REGISTRY_CONTRACT_ID",
+    "MINDVAULT_ALLOW_MAINNET",
+  ] as const;
+  for (const key of passthrough) {
+    const value = process.env[key];
+    if (value) env[key] = value;
+  }
+  return env;
+}
+
+function buildClientConfigSnippet(
+  clientId: ClientConfigId,
+  entrypoint: string,
+  env: Record<string, string>,
+): string {
+  const profile = CLIENT_CONFIG_PROFILES[clientId];
+  const serverName = env.STELLAR_NETWORK === "mainnet" ? "mindvault-mainnet" : "mindvault";
+
+  if (profile.format === "toml") {
+    const lines = [`[mcp_servers.${serverName}]`, `command = "node"`, `args = ["${entrypoint}"]`];
+    if (Object.keys(env).length > 0) {
+      lines.push("", `[mcp_servers.${serverName}.env]`);
+      for (const [key, value] of Object.entries(env)) lines.push(`${key} = "${value}"`);
+    }
+    return lines.join("\n");
+  }
+
+  const body: Record<string, unknown> = {
+    ...(clientId === "vscode" ? { type: "stdio" } : {}),
+    command: "node",
+    args: [entrypoint],
+    env,
+  };
+  return JSON.stringify({ [profile.topLevelKey]: { [serverName]: body } }, null, 2);
+}
+
+/**
+ * Emit a copy-paste MCP client config for one client (or every supported
+ * client when omitted), using this server's detected entrypoint path and
+ * network profile instead of the placeholders in docs/mcp-client-configs.md.
+ */
+export function clientConfig(client?: string): string {
+  const entrypoint = detectEntrypointPath();
+  const env = detectConfigEnv();
+
+  if (client !== undefined) {
+    if (!(client in CLIENT_CONFIG_PROFILES)) {
+      const known = Object.keys(CLIENT_CONFIG_PROFILES).join(", ");
+      throw new Error(`Unknown client "${client}". Supported clients: ${known}.`);
+    }
+    const id = client as ClientConfigId;
+    const fence = CLIENT_CONFIG_PROFILES[id].format;
+    return [
+      `## ${CLIENT_CONFIG_PROFILES[id].label}`,
+      "",
+      "```" + fence,
+      buildClientConfigSnippet(id, entrypoint, env),
+      "```",
+    ].join("\n");
+  }
+
+  const sections = (Object.keys(CLIENT_CONFIG_PROFILES) as ClientConfigId[]).map((id) => {
+    const fence = CLIENT_CONFIG_PROFILES[id].format;
+    return [
+      `## ${CLIENT_CONFIG_PROFILES[id].label}`,
+      "",
+      "```" + fence,
+      buildClientConfigSnippet(id, entrypoint, env),
+      "```",
+    ].join("\n");
+  });
+  return sections.join("\n\n");
+}
+
 /**
  * Verify the installed registry-client bindings match the deployed contract's
- * interface. Returns the check's deterministic, agent-safe message (a match
- * summary, a mismatch warning with a recommended fix, or a "could not verify"
- * note when the contract/RPC is unreachable).
+ * interface. Returns the check's deterministic, agent-safe message.
  */
 async function checkBindings(): Promise<string> {
   if (_isMock()) return "Mock mode: contract binding check skipped (no live RPC).";
@@ -2761,12 +3729,11 @@ async function checkBindings(): Promise<string> {
 }
 
 /**
- * Return opt-in tool-level metrics as JSON. Only counts, durations, and tool
- * names are included — never arguments, wallets, or API keys. When metrics are
- * disabled, returns an actionable note instead of counters. Pass reset=true to
- * clear counters after reading.
+ * Return opt-in tool-level metrics in the requested export format (json or
+ * otlp). Pass reset=true to clear counters after reading. Text-only when
+ * disabled (still JSON so structuredContent works).
  */
-function toolMetrics(reset: boolean): string {
+function toolMetrics(reset: boolean, format: MetricsExportFormat): string {
   const snapshot = metrics.snapshot();
   if (reset) metrics.reset();
   if (!snapshot.enabled) {
@@ -2780,44 +3747,23 @@ function toolMetrics(reset: boolean): string {
       2,
     );
   }
-  return JSON.stringify(snapshot, null, 2);
+  return serializeMetricsExport(snapshot, format);
 }
 
-/**
- * Return opt-in tool-level metrics as JSON. Pass reset=true to clear counters
- * after reading. Text-only when disabled (still JSON so structuredContent works).
- */
-function toolMetrics(reset: boolean): string {
-  const snapshot = metrics.snapshot();
-  if (reset) metrics.reset();
-  if (!snapshot.enabled) {
-    return JSON.stringify(
-      {
-        enabled: false,
-        message:
-          "Metrics are disabled. Set MINDVAULT_METRICS=1 (or true/yes/on) and restart the server to collect tool-level metrics.",
-      },
-      null,
-      2,
-    );
-  }
-  return JSON.stringify(snapshot, null, 2);
-}
-
-const TOOLS_WITHOUT_ARG_VALIDATION = new Set([
-  "mindvault_publish_status",
-  "mindvault_purchase_history",
-]);
+const SELF_VALIDATING_TOOLS = new Set(TOOLS_WITHOUT_ARG_VALIDATION);
 
 function isDispatchableTool(name: string): boolean {
-  return name in TOOL_ARGUMENT_SPECS || TOOLS_WITHOUT_ARG_VALIDATION.has(name);
+  return name in TOOL_ARGUMENT_SPECS || SELF_VALIDATING_TOOLS.has(name);
 }
 
 const STATE_MUTATING_TOOLS = new Set([
   "mindvault_setup_wallet",
+  "mindvault_repair_sponsored_account",
   "mindvault_use_profile",
+  "mindvault_switch_network_profile",
   "mindvault_register",
   "mindvault_publish",
+  "mindvault_publish_batch",
   "mindvault_buy",
   "mindvault_register_onchain",
   "mindvault_update_metadata",
@@ -2826,7 +3772,10 @@ const STATE_MUTATING_TOOLS = new Set([
   "mindvault_accept_transfer",
   "mindvault_cancel_transfer",
   "mindvault_set_listed",
+  "mindvault_terms",
   "mindvault_set_tags",
+  "mindvault_freeze",
+  "mindvault_royalty",
   "mindvault_reset",
   "mindvault_restore_state",
   "mindvault_import_wallet",
@@ -2845,6 +3794,12 @@ async function dispatchToolOutcome(
     throw new UnknownToolError(name);
   }
 
+  // Read-only mode is checked before argument validation (#593): when the
+  // server cannot run this tool at all, a malformed-arguments error would be
+  // a misleading thing to report, and the refusal does not depend on the
+  // arguments being well-formed.
+  assertToolAllowedInReadOnlyMode(name, process.env);
+
   const rawRecord =
     typeof rawArgs === "object" && rawArgs !== null && !Array.isArray(rawArgs)
       ? (rawArgs as Record<string, unknown>)
@@ -2857,20 +3812,43 @@ async function dispatchToolOutcome(
     name in TOOL_ARGUMENT_SPECS && !isDryRunCall ? validateToolArgs(name, rawArgs) : {};
   const dryRunArgs = isDryRunCall ? (rawRecord as ValidatedArgs) : args;
 
-  assertMainnetMutationAllowed(NETWORK, name, rawRecord);
+  if (!(name === "mindvault_terms" && rawRecord.operation === "get")) {
+    assertMainnetMutationAllowed(NETWORK, name, rawRecord);
+  }
+
+  // Network-independent spend confirmation (#594). Distinct from the mainnet
+  // guardrail above (which only fires on pubnet) and from the auto-pay ceiling
+  // in buy() (which only fires above an amount); a call may have to satisfy
+  // all three. Off unless MINDVAULT_CONFIRM_PAID_OPERATIONS says otherwise.
+  assertPaidOperationConfirmed({
+    toolName: name,
+    args: rawRecord,
+    dryRun: isDryRunCall,
+    env: process.env,
+  });
 
   if (API_MUTATION_TOOLS.has(name) && !isDryRunCall) {
     await assertApiReachableFor(name);
   }
 
-  const execute = async (): Promise<string> => {
+  const execute = async (): Promise<ToolOutcome> => {
     switch (name) {
       case "mindvault_setup_wallet":
         return setupWallet(optionalString(args, "profile"));
+      case "mindvault_repair_sponsored_account":
+        return repairSponsoredAccount(
+          requiredString(args, "secretKey"),
+          optionalString(args, "profile"),
+        );
       case "mindvault_wallet_info":
         return walletInfoOutcome();
       case "mindvault_use_profile":
         return useProfileOutcome(requiredString(args, "name"));
+      case "mindvault_switch_network_profile":
+        return switchNetworkProfile(
+          requiredString(args, "name"),
+          requiredString(args, "network") as "testnet" | "mainnet",
+        );
       case "mindvault_list_profiles":
         return listProfilesOutcome();
       case "mindvault_browse": {
@@ -2899,6 +3877,33 @@ async function dispatchToolOutcome(
         });
       case "mindvault_publish_status":
         return publishStatus(rawRecord, onProgress);
+      case "mindvault_publish_batch": {
+        const batchItems = rawRecord.items;
+        if (!Array.isArray(batchItems) || batchItems.length === 0) {
+          throw new Error("mindvault_publish_batch: items must be a non-empty array.");
+        }
+        const typedItems: BatchPublishItem[] = batchItems.map((item: any, i: number) => {
+          if (!item || typeof item !== "object") {
+            throw new Error(`mindvault_publish_batch: items[${i}] must be an object.`);
+          }
+          if (typeof item.title !== "string" || item.title.trim() === "") {
+            throw new Error(`mindvault_publish_batch: items[${i}].title must be a non-empty string.`);
+          }
+          if (typeof item.price !== "string" || item.price.trim() === "") {
+            throw new Error(`mindvault_publish_batch: items[${i}].price must be a non-empty string.`);
+          }
+          if (typeof item.externalUrl !== "string" || item.externalUrl.trim() === "") {
+            throw new Error(`mindvault_publish_batch: items[${i}].externalUrl must be a non-empty string.`);
+          }
+          return {
+            title: item.title,
+            description: typeof item.description === "string" ? item.description : undefined,
+            price: item.price,
+            externalUrl: item.externalUrl,
+          };
+        });
+        return publishBatch(typedItems, onProgress);
+      }
       case "mindvault_buy":
         return buy(
           requiredString(dryRunArgs, "resourceId"),
@@ -2906,17 +3911,30 @@ async function dispatchToolOutcome(
           undefined,
           onProgress,
           optionalString(dryRunArgs, "maxAutoPayUsdc"),
+          args.wait,
+          args.timeoutMs,
+          args.intervalMs,
         );
       case "mindvault_purchase_history":
         return purchaseHistoryTool(rawRecord);
       case "mindvault_export_receipts":
-        return exportReceiptsTool(rawRecord);
+        return exportReceiptsToolWithTimeout(
+          rawRecord,
+          timeoutForTool("mindvault_export_receipts", "http", TIMEOUTS, TOOL_TIMEOUTS),
+        );
       case "mindvault_register_onchain":
         return registerOnchain(requiredString(args, "resourceId"), onProgress);
       case "mindvault_agent_status":
         return agentStatus();
       case "mindvault_registry_info":
         return registryInfo();
+      case "mindvault_terms":
+        return publisherTerms(
+          requiredString(args, "operation"),
+          optionalString(args, "creator"),
+          optionalString(args, "termsHash"),
+          flag(args, "confirmMainnet"),
+        );
       case "mindvault_network_profile":
         return networkProfile();
       case "mindvault_check_bindings":
@@ -2926,13 +3944,27 @@ async function dispatchToolOutcome(
           requiredString(args, "resourceId"),
           optionalString(args, "expectedMetadataHash"),
         );
+      case "mindvault_verify_attestation":
+        return verifyAttestation(
+          requiredString(args, "resourceId"),
+          requiredString(args, "attestationHash"),
+        );
       case "mindvault_registry_lookup":
         return registryLookup(requiredString(args, "resourceId"));
+      case "mindvault_batch_catalog_lookup":
+        return batchCatalogLookupOutcome(
+          requiredStringArray(args, "resourceIds"),
+          flag(args, "refetch"),
+        );
+      case "mindvault_preview_metadata_hash":
+        return previewMetadataHashOutcome(requiredString(args, "resourceId"));
       case "mindvault_registry_list":
         return registryList(
           optionalInt(args, "start", REGISTRY_LIST_DEFAULT_START),
           optionalInt(args, "limit", REGISTRY_LIST_DEFAULT_LIMIT),
         );
+      case "mindvault_registry_count":
+        return registryCount(optionalString(args, "creator"));
       case "mindvault_update_metadata":
         return updateMetadata(requiredString(args, "resourceId"), requiredString(args, "metadata"));
       case "mindvault_set_price":
@@ -2950,20 +3982,32 @@ async function dispatchToolOutcome(
         return pendingTransfer(requiredString(args, "resourceId"));
       case "mindvault_set_listed":
         return setListed(requiredString(args, "resourceId"), flag(args, "listed"));
+      case "mindvault_set_tags":
+        return setTags(requiredString(args, "resourceId"), requiredTagArray(args, "tags"));
       case "mindvault_tx_status":
         return txStatus(requiredString(args, "txHash"));
       case "mindvault_reset":
         return resetState(flag(args, "all"), rawRecord.confirm);
       case "mindvault_backup_state":
-        return backupState(requiredString(args, "passphrase"));
+        return backupState(requiredString(args, "passphrase"), rawRecord.confirm);
+      case "mindvault_resource_provenance":
+        return provenanceChain(requiredString(args, "resourceId"));
+      case "mindvault_resource_change_log":
+        return resourceChangeLog(requiredString(args, "resourceId"));
       case "mindvault_restore_state":
         return restoreStateTool(requiredString(args, "blob"), requiredString(args, "passphrase"));
       case "mindvault_metrics":
-        return toolMetrics(flag(args, "reset"));
+        return toolMetrics(flag(args, "reset"), normalizeMetricsExportFormat(args.format));
       case "mindvault_check_state_permissions":
         return checkStatePermissionsTool();
       case "mindvault_registry_health":
         return registryHealth();
+      case "mindvault_prewarm_catalog":
+        return prewarmCatalogCache();
+      case "mindvault_client_config":
+        return clientConfig(optionalString(args, "client"));
+      case "mindvault_mainnet_banner":
+        return mainnetBanner();
       case "mindvault_import_wallet":
         return importWallet({
           secretKey: optionalString(args, "secretKey"),
@@ -2974,8 +4018,14 @@ async function dispatchToolOutcome(
         return rotatePublisherKey(optionalString(args, "profile"));
       case "mindvault_verify_install":
         return formatVerifyInstall(verifyInstall(process.env));
+      case "mindvault_debug_bundle":
+        return debugBundleTool(rawRecord);
       case "mindvault_recover_catalog_cache":
         return recoverCatalogCache();
+      case "mindvault_wallet_balances":
+        return walletBalancesOutcome();
+      case "mindvault_server_endpoints":
+        return serverEndpointsOutcome();
       default:
         throw new Error(`Unknown tool: ${name}`);
     }
@@ -2994,55 +4044,6 @@ export async function dispatchTool(
   onProgress?: (progress: number, total?: number, message?: string) => Promise<void>,
 ): Promise<string> {
   return outcomeText(await dispatchToolOutcome(name, rawArgs, onProgress));
-}
-
-function toolDefinition(name: string): ToolDefinition {
-  const definition = TOOL_DEFINITIONS.find((tool) => tool.name === name);
-  if (!definition) throw new Error(`No tool definition for ${name} in TOOL_DEFINITIONS.`);
-  return definition;
-}
-
-const EXTRA_TOOL_ANNOTATIONS: Record<
-  string,
-  { title: string; readOnlyHint: boolean; destructiveHint: boolean; idempotentHint: boolean }
-> = {
-  mindvault_publish_status: {
-    title: "Publish Status",
-    readOnlyHint: true,
-    destructiveHint: false,
-    idempotentHint: true,
-  },
-  mindvault_purchase_history: {
-    title: "Purchase History",
-    readOnlyHint: true,
-    destructiveHint: false,
-    idempotentHint: true,
-  },
-};
-
-function toolAnnotations(name: string): {
-  title: string;
-  readOnlyHint: boolean;
-  destructiveHint: boolean;
-  idempotentHint: boolean;
-} {
-  if (name in EXTRA_TOOL_ANNOTATIONS) return EXTRA_TOOL_ANNOTATIONS[name];
-  const { annotations } = toolDefinition(name);
-  return {
-    title: annotations.title,
-    readOnlyHint: annotations.readOnlyHint,
-    destructiveHint: annotations.destructiveHint,
-    idempotentHint: annotations.idempotentHint,
-  };
-}
-
-function outputSchemaFor(name: string): Record<string, unknown> | undefined {
-  if (name in EXTRA_OUTPUT_SCHEMAS) return EXTRA_OUTPUT_SCHEMAS[name];
-  return TOOL_DEFINITIONS.find((tool) => tool.name === name)?.outputSchema;
-}
-
-function hasOutputSchema(name: string): boolean {
-  return outputSchemaFor(name) !== undefined;
 }
 
 /** Test helper: wrap a handler outcome the same way CallTool does. */
@@ -3069,502 +4070,16 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => ({
   contents: [await readCatalogResource(request.params.uri)],
 }));
 
-server.setRequestHandler(ListToolsRequestSchema, async () => {
-  const advertisedTools = [
-    {
-      name: "mindvault_setup_wallet",
-      description:
-        "Create a Stellar wallet using the sponsored account protocol. Optionally pass a profile name to create the wallet under a named profile (e.g. testnet, mainnet, publisher, buyer) and make it active; defaults to the active profile. The wallet (public key + secret key) is persisted to ~/.mindvault/state.json (mode 0600) and reloaded automatically on restart.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          profile: {
-            type: "string",
-            description:
-              "Optional profile name to create/switch to. Use letters, digits, dot, dash, or underscore (1–64 chars). Examples: 'testnet', 'mainnet-publisher', 'buyer.alice'",
-            examples: ["testnet", "mainnet-publisher", "buyer.alice"],
-          },
-          confirmMainnet: {
-            type: "boolean",
-            description:
-              "Required on mainnet (or set MINDVAULT_ALLOW_MAINNET=1). Explicitly confirm this mutation/payment on the public Stellar network.",
-          },
-        },
-        required: [],
-      },
-    },
-    {
-      name: "mindvault_wallet_info",
-      description:
-        "Check the active profile name, its agent wallet address, USDC balance, and whether it is registered as a publisher.",
-      inputSchema: { type: "object", properties: {}, required: [] },
-    },
-    {
-      name: "mindvault_use_profile",
-      description:
-        "Switch the active wallet profile, creating it if it does not exist. Profiles let one agent keep separate identities (e.g. testnet vs mainnet, publisher vs buyer); each has its own wallet and publisher API key. Subsequent tools operate on the active profile.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          name: {
-            type: "string",
-            description:
-              "Profile name to make active. Use letters, digits, dot, dash, or underscore (1–64 chars). Examples: 'mainnet', 'testnet-buyer', 'publisher.bob'",
-            examples: ["mainnet", "testnet-buyer", "publisher.bob"],
-          },
-        },
-        required: ["name"],
-      },
-    },
-    {
-      name: "mindvault_list_profiles",
-      description:
-        "List all named wallet profiles, marking the active one and showing each profile's wallet address and whether it is registered as a publisher. Secret keys are never shown.",
-      inputSchema: { type: "object", properties: {}, required: [] },
-    },
-    {
-      name: "mindvault_browse",
-      description:
-        "List resources in the MindVault catalog with the same optional filters as mindvault_search and GET /resources: keyword, price range, verification status, resource type, owner, sort, pagination, tags, and listed state.",
-      inputSchema: {
-        type: "object",
-        properties: { ...catalogFilterInputProperties },
-        required: [],
-      },
-    },
-    {
-      name: "mindvault_search",
-      description:
-        "Search the MindVault catalog by keyword and optional filters for price, resource type, verification status, owner, sort, pagination, tags, and listed state. Uses server-side filtering where supported and returns compact resource summaries.",
-      inputSchema: {
-        type: "object",
-        properties: { ...catalogFilterInputProperties },
-        required: [],
-      },
-    },
-    {
-      name: "mindvault_preview",
-      description:
-        "Get details and price for a specific resource before purchasing. Returns title, description, price, type, verification status, and access URL.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          resourceId: {
-            type: "string",
-            description:
-              "The unique resource identifier from mindvault_browse or mindvault_search. Example: 'cm7x8y9z'",
-            examples: ["cm7x8y9z", "res-001", "ckx9j2h3f"],
-          },
-        },
-        required: ["resourceId"],
-      },
-    },
-    {
-      name: "mindvault_register",
-      description:
-        "Register as a publisher using the agent wallet. The API key is persisted to ~/.mindvault/state.json (mode 0600, key not shown in output) and reloaded on restart so mindvault_publish works across sessions.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          name: { type: "string" },
-          email: { type: "string" },
-          walletAddress: { type: "string" },
-          confirmMainnet: {
-            type: "boolean",
-            description:
-              "Required on mainnet (or set MINDVAULT_ALLOW_MAINNET=1). Explicitly confirm this mutation/payment on the public Stellar network.",
-          },
-        },
-        required: ["name", "email"],
-      },
-    },
-    {
-      name: "mindvault_publish",
-      description:
-        "Publish a link resource to the MindVault catalog. The resource undergoes AI verification (agent wallet pays ~$0.10 USDC via x402) and is automatically registered on-chain if verified. Returns resource ID, access URL, verification result, and on-chain registration status.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          title: { type: "string" },
-          description: { type: "string" },
-          price: { type: "string" },
-          externalUrl: { type: "string" },
-          confirmMainnet: {
-            type: "boolean",
-            description:
-              "Required on mainnet (or set MINDVAULT_ALLOW_MAINNET=1). Explicitly confirm this mutation/payment on the public Stellar network.",
-          },
-        },
-        required: ["title", "price", "externalUrl"],
-      },
-    },
-    {
-      name: "mindvault_publish_status",
-      description:
-        "Poll a published resource's verification and on-chain sync status. Returns verificationStatus (pending, verified, rejected, skipped), listed, onchainStatus, onchainTxHash, and optional verification details. Pass wait: true to poll until verification settles or timeoutMs elapses. Deterministic errors for missing resourceId and 404s.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          resourceId: {
-            type: "string",
-            description:
-              "The resource ID from mindvault_publish (or browse/search). Example: 'cm7x8y9z'",
-            examples: ["cm7x8y9z", "res-001", "swcn98besxpp6t1u8e77fqz3"],
-          },
-          wait: {
-            type: "boolean",
-            description:
-              "When true, poll until verificationStatus is verified, rejected, or skipped (or until timeoutMs). Default false (single fetch).",
-          },
-          timeoutMs: {
-            type: "number",
-            description:
-              "Max wait time in milliseconds when wait is true (default 60000, max 300000).",
-            examples: [30000, 60000, 120000],
-          },
-          intervalMs: {
-            type: "number",
-            description:
-              "Delay between polls in milliseconds when wait is true (default 2000, min 200).",
-            examples: [1000, 2000, 5000],
-          },
-        },
-        required: ["resourceId"],
-      },
-    },
-    {
-      name: "mindvault_buy",
-      description:
-        "Pay USDC via x402 and access a resource. On mainnet, pass confirmMainnet: true (or set MINDVAULT_ALLOW_MAINNET=1).",
-      inputSchema: {
-        type: "object",
-        properties: {
-          resourceId: { type: "string" },
-          confirmMainnet: {
-            type: "boolean",
-            description:
-              "Required on mainnet (or set MINDVAULT_ALLOW_MAINNET=1). Explicitly confirm this mutation/payment on the public Stellar network.",
-          },
-        },
-        required: ["resourceId"],
-      },
-    },
-    {
-      name: "mindvault_purchase_history",
-      description:
-        "List locally persisted purchase receipts from successful mindvault_buy calls (~/.mindvault/purchases.json). Read-only. Optional filters: resourceId and network (exact match, e.g. stellar:testnet). Returns count + purchases (newest first), or an empty list when nothing matches.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          resourceId: {
-            type: "string",
-            description: "Optional. Only return receipts for this resource id. Example: 'cm7x8y9z'",
-            examples: ["cm7x8y9z", "res-001"],
-          },
-          network: {
-            type: "string",
-            description:
-              "Optional. Only return receipts recorded on this x402 network id. Example: 'stellar:testnet'",
-            examples: ["stellar:testnet", "stellar:pubnet"],
-          },
-        },
-        required: [],
-      },
-    },
-    toolDefinition("mindvault_export_receipts"),
-    {
-      name: "mindvault_register_onchain",
-      description:
-        "Register an already-published, verified resource on the vault registry contract. Use this to retry on-chain registration after mindvault_publish reports the on-chain step failed. Prepares the unsigned transaction, signs it with the agent wallet (which must be the resource creator), submits it, and returns the registry status and on-chain tx hash.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          resourceId: {
-            type: "string",
-            description:
-              "The resource ID to register on-chain (from mindvault_publish output). Must be verified and not already registered. Example: 'cm7x8y9z'",
-            examples: ["cm7x8y9z", "res-001", "ckx9j2h3f"],
-          },
-          confirmMainnet: {
-            type: "boolean",
-            description:
-              "Required on mainnet (or set MINDVAULT_ALLOW_MAINNET=1). Explicitly confirm this mutation/payment on the public Stellar network.",
-          },
-        },
-        required: ["resourceId"],
-      },
-    },
-    {
-      name: "mindvault_agent_status",
-      description:
-        "Check the verification agent's earnings and activity. Returns total verifications, pass/fail counts, total USDC earned, average confidence score, and recent verification history with resource titles.",
-      inputSchema: { type: "object", properties: {}, required: [] },
-    },
-    {
-      name: "mindvault_registry_info",
-      description:
-        "Return the on-chain vault-registry contract ID, network passphrase, RPC URL, and the resource fields available for direct Soroban queries. Use this to verify ownership, price, and listing state directly from Stellar without trusting the MindVault API.",
-      inputSchema: { type: "object", properties: {}, required: [] },
-    },
-    {
-      name: "mindvault_network_profile",
-      description:
-        "Report current Stellar/x402 network configuration (testnet/mainnet), RPC URLs, registry contract ID, and warnings for custom overrides. Use this to verify which network the MCP is connected to and diagnose configuration issues.",
-      inputSchema: { type: "object", properties: {}, required: [] },
-    },
-    {
-      name: "mindvault_check_bindings",
-      description:
-        "Verify the installed registry-client bindings match the deployed vault-registry contract interface. Reports a match, or a warning listing the drifting methods with the contract ID, network, client version, and a recommended fix (redeploy the contract or regenerate bindings). Useful after a contract redeploy or client upgrade.",
-      inputSchema: { type: "object", properties: {}, required: [] },
-    },
-    {
-      name: "mindvault_check_consistency",
-      description:
-        "Compare a resource from the API catalog with the same resource in the vault-registry contract. Reports matching fields, mismatches, missing API records, and missing on-chain records. Useful for detecting synchronization issues between the API and on-chain registry.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          resourceId: {
-            type: "string",
-            description: "The resource ID to compare between API and on-chain registry.",
-          },
-          expectedMetadataHash: {
-            type: "string",
-            description:
-              "Optional. The canonical SHA-256 digest (sha256:<hex>) of the off-chain content the agent expects to be anchored on-chain. When supplied, it is compared against the contentHash in the on-chain metadata pointer.",
-            examples: ["sha256:1f09d48cb617cd04c123454e2b1b6d51acd66378f2c4b79d5ac09e9d3b123456"],
-          },
-        },
-        required: ["resourceId"],
-      },
-    },
-    {
-      name: "mindvault_registry_lookup",
-      description:
-        "Look up a resource directly from the on-chain vault registry by its ID. Returns creator wallet address, price (USDC), metadata (title/description), listed state, tags, contract ID, and network. Data comes from Stellar/Soroban, not the MindVault API. Returns an actionable message when the resource is not registered on-chain.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          resourceId: {
-            type: "string",
-            description:
-              "The resource ID to look up on-chain. Must be a registered resource. Example: 'cm7x8y9z'",
-            examples: ["cm7x8y9z", "res-001", "ckx9j2h3f"],
-          },
-        },
-        required: ["resourceId"],
-      },
-    },
-    {
-      name: "mindvault_registry_list",
-      description:
-        "List resources registered in the on-chain vault-registry contract with pagination (Soroban list). Returns compact summaries directly from Stellar, not the MindVault API catalog. Use start/limit to page through insertion order; limit is capped at 20 to match the contract. Empty pages return a clear message and next-step hint.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          start: {
-            type: "integer",
-            minimum: 0,
-            description:
-              "0-based index into the on-chain registry (default 0). Example: 0 for the first page, 20 for the second page when limit is 20.",
-            examples: [0, 20],
-          },
-          limit: {
-            type: "integer",
-            minimum: 1,
-            maximum: 20,
-            description:
-              "Page size (1–20, default 20). The contract silently caps higher values at 20.",
-            examples: [20, 10],
-          },
-        },
-        required: [],
-      },
-    },
-    {
-      name: "mindvault_tx_status",
-      description:
-        "Look up the status of a Stellar transaction by hash via Soroban RPC. Returns SUCCESS, FAILED, or NOT_FOUND along with ledger number, close time, application order, and XDR envelopes. Useful for debugging on-chain registration failures.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          txHash: {
-            type: "string",
-            description:
-              "The 64-character hex transaction hash from Stellar. Example: 'abc123def456...' (from mindvault_register_onchain or mindvault_publish output).",
-            examples: [
-              "abc123def456789012345678901234567890123456789012345678901234",
-              "f47ac10b58cc4372a5670e02b2c3d479c3e5d0a1b2c3d4e5f6a7b8c9d0e1f2a3",
-            ],
-          },
-        },
-        required: ["txHash"],
-      },
-    },
-    {
-      name: "mindvault_reset",
-      description:
-        "Clear credentials from memory and disk (~/.mindvault/state.json). Destructive and irreversible, so it is two-step: without confirm=true the call changes nothing and returns a warning listing exactly what would be removed; call again with confirm=true to perform it. By default only the active profile is cleared; pass all=true to remove every profile and delete the state file. After a confirmed reset, run mindvault_setup_wallet and mindvault_register again.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          confirm: {
-            type: "boolean",
-            description:
-              "Required to actually clear anything. Omitted or false returns a warning describing what would be removed and performs no deletion. Example: true clears the credentials.",
-            examples: [true, false],
-          },
-          all: {
-            type: "boolean",
-            description:
-              "Clear every profile and delete the state file (default: false clears active profile only). Example: true removes all profiles.",
-            examples: [true, false],
-          },
-          confirmMainnet: {
-            type: "boolean",
-            description:
-              "Required on mainnet (or set MINDVAULT_ALLOW_MAINNET=1). Explicitly confirm this mutation/payment on the public Stellar network.",
-          },
-        },
-        required: [],
-      },
-    },
-    {
-      name: "mindvault_backup_state",
-      description:
-        "Export an encrypted backup of ~/.mindvault/state.json for moving agent environments. Requires a passphrase (min 8 chars). Output is a self-contained ciphertext blob — wallet secret keys and API keys never appear in plaintext. Restore with mindvault_restore_state using the same passphrase. Does not change reset behavior.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          passphrase: {
-            type: "string",
-            description:
-              "Passphrase used to encrypt the backup (min 8 characters). Keep it offline.",
-          },
-        },
-        required: ["passphrase"],
-      },
-    },
-    {
-      name: "mindvault_restore_state",
-      description:
-        "Restore ~/.mindvault/state.json from an encrypted backup produced by mindvault_backup_state. Validates integrity (wrong passphrase or tampered data fails before any write). Replaces in-memory profiles and re-persists to disk (mode 0600). Existing reset behavior is unchanged.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          blob: {
-            type: "string",
-            description: "Encrypted backup blob from mindvault_backup_state (v1:… format).",
-          },
-          passphrase: {
-            type: "string",
-            description: "Passphrase used when the backup was created (min 8 characters).",
-          },
-        },
-        required: ["blob", "passphrase"],
-      },
-    },
-    {
-      name: "mindvault_metrics",
-      description:
-        "Return opt-in tool-level metrics: per-tool call/error counts and durations, plus payment attempt/failure totals. Enable by setting MINDVAULT_METRICS=1 on the server. Output contains only tool names, counts, and durations — never arguments, wallets, or API keys. Pass reset=true to clear counters after reading.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          reset: {
-            type: "boolean",
-            description:
-              "Clear all counters after returning the current snapshot (default: false leaves counters intact). Example: true resets metrics after reading.",
-            examples: [true, false],
-          },
-        },
-        required: [],
-      },
-    },
-    {
-      name: "mindvault_check_state_permissions",
-      description:
-        "Verify the state file (~/.mindvault/state.json) has safe permissions (mode 0600). Warns when the file is world-readable or group-readable, which would expose wallet secret keys and API keys to other system users. Safe by default; run after any manual file operations or environment migration.",
-      inputSchema: { type: "object", properties: {}, required: [] },
-    },
-    {
-      name: "mindvault_registry_health",
-      description:
-        "Check the health of every dependency the MCP server relies on: MindVault API, Horizon, Soroban RPC, vault-registry contract, and x402 network alignment. Returns per-dependency status (ok/error) with actionable failure messages. Does not leak secrets or environment variables.",
-      inputSchema: { type: "object", properties: {}, required: [] },
-    },
-    {
-      name: "mindvault_import_wallet",
-      description:
-        "Import an existing Stellar wallet by providing a secret key (or reading MINDVAULT_AGENT_SECRET from the environment). Validates the key, optionally persists it to the active profile (or a named profile), and never logs the secret. Use this to restore a wallet from backup or connect to an existing identity.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          secretKey: {
-            type: "string",
-            description:
-              "Stellar secret key (S… , 56 chars) to import. If omitted, reads from MINDVAULT_AGENT_SECRET env var.",
-            examples: ["SCHZPJ..."],
-          },
-          profile: {
-            type: "string",
-            description: "Optional profile name to import into. Defaults to the active profile.",
-            examples: ["testnet", "mainnet-publisher"],
-          },
-          persist: {
-            type: "boolean",
-            description:
-              "When true (default), save the imported wallet to the state file. When false, validate only and return the public key without writing to disk.",
-            examples: [true, false],
-          },
-          confirmMainnet: {
-            type: "boolean",
-            description:
-              "Required on mainnet (or set MINDVAULT_ALLOW_MAINNET=1). Explicitly confirm this mutation on the public Stellar network.",
-          },
-        },
-        required: [],
-      },
-    },
-    {
-      name: "mindvault_rotate_publisher_key",
-      description:
-        "Rotate the publisher API key for the active profile. Calls the MindVault server rotation endpoint (POST /publishers/rotate-key), stores the new key in the state file, and returns the updated publisher ID. The old key is invalidated server-side. Requires an existing registration (mindvault_register).",
-      inputSchema: {
-        type: "object",
-        properties: {
-          profile: {
-            type: "string",
-            description:
-              "Optional profile name to rotate the key for. Defaults to the active profile.",
-            examples: ["testnet", "mainnet-publisher"],
-          },
-          confirmMainnet: {
-            type: "boolean",
-            description:
-              "Required on mainnet (or set MINDVAULT_ALLOW_MAINNET=1). Explicitly confirm this mutation on the public Stellar network.",
-          },
-        },
-        required: [],
-      },
-    },
-    {
-      name: "mindvault_verify_install",
-      description:
-        "Verify the MindVault MCP server is installed and configured correctly. Checks Node.js version (>=20), network settings, URL variables, vault-registry contract ID, and warns about plaintext secrets in the environment. No network calls are made — all checks are local. Run this first when setting up a new agent or diagnosing a configuration problem.",
-      inputSchema: { type: "object", properties: {}, required: [] },
-    },
-  ];
-
-  return {
-    tools: advertisedTools.map((tool) => ({
-      ...tool,
-      annotations: toolAnnotations(tool.name),
-      ...(outputSchemaFor(tool.name) ? { outputSchema: outputSchemaFor(tool.name) } : {}),
-    })),
-  };
-});
+// ListTools is derived from TOOL_DEFINITIONS rather than restated here (#596).
+// The handler used to carry its own copy of the whole list, which had drifted
+// from tools.ts in both directions — six implemented tools were undiscoverable,
+// two advertised tools were missing from the generated docs, and several
+// schemas had lost their field descriptions and optional arguments.
+// `listToolsContract.test.ts` checks this response against the definitions, the
+// argument validator, and the dispatch switch on every run.
+server.setRequestHandler(ListToolsRequestSchema, async () => ({
+  tools: advertisedTools(process.env),
+}));
 
 server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
   const { name, arguments: args = {} } = request.params;
@@ -3574,12 +4089,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
       ? createProgressEmitter({ token: progressToken, send: extra.sendNotification })
       : undefined;
   try {
-    const result = await measureTool(metrics, name, () => dispatchTool(name, args, onProgress));
-    const structured = structuredResult(name, result);
-    return {
-      content: [{ type: "text", text: result }],
-      ...(structured ? { structuredContent: structured } : {}),
-    };
+    const result = await measureTool(metrics, name, () =>
+      dispatchToolOutcome(name, args, onProgress),
+    );
+    // Opt-in structured telemetry stream (#891): one OTLP line to stderr per
+    // tool call when MINDVAULT_METRICS_EXPORT_CONSOLE is set, so a log
+    // collector or otel-collector can tail the export without touching stdout.
+    if (metricsExportToConsoleEnabled(process.env) && metrics.enabled) {
+      console.error(metricsExportLine(metrics.snapshot(), "otlp"));
+    }
+    return normalizeToolResult(name, result, hasOutputSchema);
   } catch (err: any) {
     const mapped = mappedErrorOf(err);
     return {
@@ -3619,7 +4138,7 @@ if (!process.env.VITEST && !MOCK) {
     network: STELLAR_NETWORK,
   })
     .then((result: { status: string; message: string }) => {
-      if (result.status === "mismatch") console.error(`MindVault MCP: ${result.message}`);
+      if (result.status === "mismatch") logger.warn(`MindVault MCP: ${result.message}`);
     })
     .catch(() => {});
 }
@@ -3653,6 +4172,13 @@ if (!process.env.VITEST) {
   process.on("SIGTERM", () => shutdown("SIGTERM"));
 
   process.stdin.on("end", () => shutdown("stdin-EOF"));
+
+  // Best-effort catalog cache pre-warm (#882). Fire-and-forget: never blocks
+  // startup and never crashes the process if the API is unreachable — a
+  // failed pre-warm just means the first mindvault_browse pays the normal
+  // cold-cache cost, which is the status quo this is improving on, not a
+  // regression.
+  prewarmCatalogCache().catch(() => {});
 
   await server.connect(transport);
 }

@@ -326,6 +326,34 @@ export function mockRegistryLookup(
   );
 }
 
+export function mockVerifyAttestation(
+  resourceId: string,
+  expectedAttestationHash: string,
+  contractId: string,
+): string {
+  const registeredAttestationHash = resourceId === "mock1" ? "mock-attestation-1" : null;
+  const matches =
+    registeredAttestationHash !== null && registeredAttestationHash === expectedAttestationHash;
+  return JSON.stringify(
+    {
+      source: "on-chain (mock)",
+      resourceId,
+      expectedAttestationHash,
+      registeredAttestationHash,
+      matches,
+      verified: matches,
+      summary: matches
+        ? "Attestation hash matches the value registered on-chain."
+        : registeredAttestationHash === null
+          ? "No attestation hash is registered for this resource in mock mode."
+          : "The supplied attestation hash does not match the value registered on-chain.",
+      contract: contractId,
+    },
+    null,
+    2,
+  );
+}
+
 export function mockUpdateMetadata(resourceId: string, metadata: string): string {
   return JSON.stringify(
     {
@@ -432,6 +460,47 @@ export function mockSetListed(resourceId: string, listed: boolean): string {
       listed,
       txHash: `MOCK_TX_SET_LISTED_${resourceId}`,
       explorerUrl: explorerTxUrl(`MOCK_TX_SET_LISTED_${resourceId}`),
+      source: "on-chain (mock)",
+    },
+    null,
+    2,
+  );
+}
+
+export function mockSetTags(resourceId: string, tags: string[]): string {
+  const txHash = `MOCK_TX_SET_TAGS_${resourceId}`;
+  return [
+    `Tags updated for resource "${resourceId}".`,
+    `Tags: ${tags.length > 0 ? tags.join(", ") : "(none)"}`,
+    `Tx hash: ${txHash}`,
+    `Explorer: ${explorerTxUrl(txHash)}`,
+    "Source: on-chain (mock)",
+  ].join("\n");
+}
+
+/**
+ * Deterministic mock for batch publish. Returns a summary that mirrors the
+ * real `publishBatch` output with all items approved and registered on-chain.
+ */
+export function mockPublishBatch(
+  items: Array<{ title: string; description?: string; price: string; externalUrl: string }>,
+): string {
+  const itemResults = items.map((item, i) => ({
+    index: i,
+    title: item.title,
+    id: `mock-batch-${i + 1}`,
+    verificationStatus: "approved" as const,
+    onchainStatus: "registered",
+  }));
+  return JSON.stringify(
+    {
+      requested: items.length,
+      verified: items.length,
+      rejected: 0,
+      errored: 0,
+      onchainStatus: "registered",
+      txHash: `MOCK_TX_BATCH_REGISTER`,
+      items: itemResults,
       source: "on-chain (mock)",
     },
     null,
@@ -551,4 +620,36 @@ export function mockRegistryList(
     null,
     2,
   );
+}
+
+/**
+ * Stand-in for the on-chain count()/listed_count()/creator_resource_count()
+ * trio. Derives values from the same MOCK_REGISTRY_RESOURCES seed so the
+ * numbers stay consistent with mockRegistryList.
+ */
+export function mockRegistryCount(creator: string | undefined, contractId: string): string {
+  const all = MOCK_REGISTRY_RESOURCES;
+  const count = all.length;
+  const listedCount = all.filter((r) => r.listed).length;
+
+  const payload: {
+    source: string;
+    count: number;
+    listedCount: number;
+    creatorCount?: number;
+    creator?: string;
+    contract: string;
+  } = {
+    source: "on-chain (mock)",
+    count,
+    listedCount,
+    contract: contractId,
+  };
+
+  if (creator != null) {
+    payload.creator = creator;
+    payload.creatorCount = all.filter((r) => r.creator === creator).length;
+  }
+
+  return JSON.stringify(payload, null, 2);
 }

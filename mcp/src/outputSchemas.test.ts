@@ -4,8 +4,8 @@
 import { describe, expect, it } from "vitest";
 import { dryRunBuy, dryRunPublish } from "./dryRun.js";
 import {
+  ATTESTATION_VERIFICATION_OUTPUT_SCHEMA,
   CATALOG_LIST_OUTPUT_SCHEMA,
-  EXTRA_OUTPUT_SCHEMAS,
   LIST_PROFILES_OUTPUT_SCHEMA,
   PREVIEW_OUTPUT_SCHEMA,
   PUBLISH_BUY_OUTPUT_SCHEMA,
@@ -53,9 +53,15 @@ describe("structured tools advertise a schema", () => {
     }
   });
 
-  it("publish_status and purchase_history have extra schemas", () => {
-    expect(EXTRA_OUTPUT_SCHEMAS.mindvault_publish_status).toBe(PUBLISH_STATUS_OUTPUT_SCHEMA);
-    expect(EXTRA_OUTPUT_SCHEMAS.mindvault_purchase_history).toBe(PURCHASE_HISTORY_OUTPUT_SCHEMA);
+  it("publish_status and purchase_history advertise their schemas from TOOL_DEFINITIONS", () => {
+    // They used to live in a side table because they were missing from
+    // TOOL_DEFINITIONS; both are defined there now, so the schemas travel with
+    // the definition like every other tool's (#596).
+    const byName = new Map(TOOL_DEFINITIONS.map((t) => [t.name, t]));
+    expect(byName.get("mindvault_publish_status")?.outputSchema).toBe(PUBLISH_STATUS_OUTPUT_SCHEMA);
+    expect(byName.get("mindvault_purchase_history")?.outputSchema).toBe(
+      PURCHASE_HISTORY_OUTPUT_SCHEMA,
+    );
   });
 });
 
@@ -118,6 +124,19 @@ describe("representative payloads match advertised required keys", () => {
 
     const buy = dryRunBuy("res-001", "stellar:testnet", "https://example.com", true, "1.5");
     expect(buy.mode).toBe("dry-run");
+  });
+
+  it("attestation verification matches its required keys", () => {
+    assertKeys(ATTESTATION_VERIFICATION_OUTPUT_SCHEMA, {
+      source: "on-chain",
+      resourceId: "res-001",
+      expectedAttestationHash: "a".repeat(64),
+      registeredAttestationHash: "a".repeat(64),
+      matches: true,
+      verified: true,
+      summary: "Attestation hash matches the value registered on-chain.",
+      contract: "C…",
+    });
   });
 
   it("registry miss / recover / text fallback", () => {
