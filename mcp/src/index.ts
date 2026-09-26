@@ -185,6 +185,11 @@ import {
   type DerivePublicKey,
 } from "./sponsoredWallet.js";
 import {
+  applyPublishTemplate,
+  KNOWN_RESOURCE_TYPES,
+  type KnownResourceType,
+} from "./publishTemplate.js";
+import {
   applyCatalogSort,
   applyClientCatalogFilters,
   buildCatalogQueryString,
