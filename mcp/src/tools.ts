@@ -17,10 +17,12 @@
 import { catalogFilterInputProperties } from "./catalogFilters.js";
 import {
   AGENT_STATUS_OUTPUT_SCHEMA,
+  BATCH_CATALOG_LOOKUP_OUTPUT_SCHEMA,
   CATALOG_LIST_OUTPUT_SCHEMA,
   CONSISTENCY_OUTPUT_SCHEMA,
   FEE_CONFIG_OUTPUT_SCHEMA,
   LIST_PROFILES_OUTPUT_SCHEMA,
+  METADATA_HASH_PREVIEW_OUTPUT_SCHEMA,
   METRICS_OUTPUT_SCHEMA,
   NETWORK_PROFILE_OUTPUT_SCHEMA,
   ONCHAIN_MUTATION_OUTPUT_SCHEMA,
@@ -28,15 +30,19 @@ import {
   PUBLISH_BUY_OUTPUT_SCHEMA,
   PUBLISH_BATCH_OUTPUT_SCHEMA,
   PUBLISH_STATUS_OUTPUT_SCHEMA,
+  PUBLISH_TEMPLATE_OUTPUT_SCHEMA,
   PURCHASE_HISTORY_OUTPUT_SCHEMA,
+  BUY_OUTPUT_SCHEMA,
   RECOVER_CACHE_OUTPUT_SCHEMA,
   REGISTER_ONCHAIN_OUTPUT_SCHEMA,
   REGISTRY_COUNT_OUTPUT_SCHEMA,
   REGISTRY_INFO_OUTPUT_SCHEMA,
   REGISTRY_LIST_OUTPUT_SCHEMA,
   REGISTRY_LOOKUP_OUTPUT_SCHEMA,
+  RESOURCE_SUBSCRIPTION_OUTPUT_SCHEMA,
   TX_STATUS_OUTPUT_SCHEMA,
   USE_PROFILE_OUTPUT_SCHEMA,
+  WALLET_BALANCES_OUTPUT_SCHEMA,
   WALLET_INFO_OUTPUT_SCHEMA,
   WALLET_SETUP_OUTPUT_SCHEMA,
 } from "./outputSchemas.js";
@@ -354,7 +360,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     name: "mindvault_buy",
     description:
-      "Pay USDC via x402 and access a resource. Payments above MINDVAULT_MAX_AUTO_PAY_USDC (10 USDC by default) require maxAutoPayUsdc set to at least the resource price. On mainnet, pass confirmMainnet: true (or set MINDVAULT_ALLOW_MAINNET=1). Pass dryRun: true to validate the resource and show intended payment flow without submitting payment.",
+      "Pay USDC via x402 and access a resource. Payments above MINDVAULT_MAX_AUTO_PAY_USDC (10 USDC by default) require maxAutoPayUsdc set to at least the resource price. On mainnet, pass confirmMainnet: true (or set MINDVAULT_ALLOW_MAINNET=1). Pass dryRun: true to validate the resource and show intended payment flow without submitting payment. Pass wait: true to poll the payment transaction until it settles on-chain before returning.",
     inputSchema: {
       type: "object",
       properties: {
@@ -381,10 +387,32 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
             "Required on mainnet (or set MINDVAULT_ALLOW_MAINNET=1). Explicitly confirm this mutation/payment on the public Stellar network.",
         },
         confirmPaid: { ...CONFIRM_PAID_PROPERTY },
+        wait: {
+          type: "boolean",
+          description:
+            "Optional flag. When true, wait and poll the payment transaction on Soroban until it settles (SUCCESS or FAILED) or the timeout elapses, returning a settlement confirmation block. Off by default, in which case the buy returns as soon as the payment response arrives.",
+        },
+        timeoutMs: {
+          type: "integer",
+          minimum: 0,
+          maximum: 300000,
+          description:
+            "Optional deadline in milliseconds for settlement confirmation when wait is true. Default 60000, inclusive maximum 300000.",
+          default: 60000,
+          examples: [30000, 60000],
+        },
+        intervalMs: {
+          type: "integer",
+          minimum: 200,
+          description:
+            "Optional interval in milliseconds between settlement status polls when wait is true. Default 2000, minimum 200.",
+          default: 2000,
+          examples: [500, 2000],
+        },
       },
       required: ["resourceId"],
     },
-    outputSchema: PUBLISH_BUY_OUTPUT_SCHEMA as unknown as Record<string, unknown>,
+    outputSchema: BUY_OUTPUT_SCHEMA as unknown as Record<string, unknown>,
     annotations: {
       title: "Buy Resource",
       readOnlyHint: false,
@@ -790,7 +818,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     name: "mindvault_metrics",
     description:
-      "Return opt-in tool-level metrics: per-tool call/error counts and durations, plus payment attempt/failure totals. Enable by setting MINDVAULT_METRICS=1 on the server. Output contains only tool names, counts, and durations — never arguments, wallets, or API keys. Pass reset=true to clear counters after reading.",
+      "Return opt-in tool-level metrics: per-tool call/error counts and durations, plus payment attempt/failure totals. Enable by setting MINDVAULT_METRICS=1 on the server. Output contains only tool names, counts, and durations — never arguments, wallets, or API keys. Pass reset=true to clear counters after reading. format=otlp renders the same snapshot as an OTLP/JSON ExportMetricsServiceRequest body for direct submission to an OpenTelemetry collector.",
     inputSchema: {
       type: "object",
       properties: {
@@ -799,6 +827,14 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
           description:
             "Clear all counters after returning the current snapshot (default: false leaves counters intact). Example: true resets metrics after reading.",
           examples: [true, false],
+        },
+        format: {
+          type: "string",
+          enum: ["json", "otlp"],
+          description:
+            "Metrics export format. json (default) returns the snapshot object; otlp returns the same data as an OTLP/JSON ExportMetricsServiceRequest payload (a resourceMetrics envelope ready for an OpenTelemetry collector).",
+          default: "json",
+          examples: ["json", "otlp"],
         },
       },
       required: [],

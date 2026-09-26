@@ -128,14 +128,14 @@ server calls.
 Handlers receive normalized values, so a tool behaves identically whichever
 accepted spelling the agent used:
 
-| Argument kind          | Normalization                     |
-| ---------------------- | --------------------------------- |
-| string                 | trimmed                           |
-| enum                   | trimmed, compared exactly         |
-| flag                   | coerced to a real boolean         |
-| `txHash`               | lowercased bare hex               |
-| `expectedMetadataHash` | canonical `sha256:<hex>` form     |
-| `tags`                 | trimmed, lowercased, deduplicated |
+| Argument kind          | Normalization                 |
+| ---------------------- | ----------------------------- |
+| string                 | trimmed                       |
+| enum                   | trimmed, compared exactly     |
+| flag                   | coerced to a real boolean     |
+| `txHash`               | lowercased bare hex           |
+| `expectedMetadataHash` | canonical `sha256:<hex>` form |
+| string_array           | per-entry trimmed, empties dropped; case and duplicates kept (unlike `tag_array`, entries are data selectors, not on-chain tags) |
 
 ---
 
@@ -151,3 +151,22 @@ error. They now fail like every other invalid call, so an agent can rely on
   `"Provide a transaction hash to look up."`)
 
 Valid calls are unaffected.
+
+### `mindvault_publish_template`
+
+This tool is **read-only** — it makes no API calls, no payments, and touches no
+wallet state. It returns a pre-filled publish spec (JSON) that an agent can
+review and override before passing to `mindvault_publish`.
+
+Key points:
+
+- `resourceType` is required; all other arguments are optional overrides.
+- When a caller-supplied value is present, it wins over the type default.
+- `tags` **replaces** the type-default tag set; it does not merge with it.
+- Fields that still contain a placeholder (`<HASH>` or `<CID>`) are called out
+  in `nextSteps`, so the agent knows what must be filled in before publishing.
+- The `metadataPointer` override must start with one of the accepted prefixes
+  (`ipfs://`, `ar://`, `http(s)://`, `sha256:`, `sha-256:`, or `0x`). The
+  type-default pointer (e.g. `sha256:<HASH>`) is a format hint, not a valid
+  pointer, and must be replaced with a real hash or CID before calling
+  `mindvault_publish`.

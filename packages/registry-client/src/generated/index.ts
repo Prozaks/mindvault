@@ -271,6 +271,11 @@ export interface CatalogPage {
   next_cursor: Option<u32>;
 }
 
+export interface TagPopularity {
+  count: u32;
+  tag: string;
+}
+
 /**
  * Wrapper for an optional [`FlagReason`] value, used as the `dispute_flag`
  * field of [`Resource`]. Soroban's `contracttype` macro requires that all
