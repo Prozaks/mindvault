@@ -276,6 +276,13 @@ export const TOOL_ARGUMENT_SPECS: Record<string, ToolArgumentSpec> = {
     maxAutoPayUsdc: { ...USDC_AMOUNT, required: false },
     confirmMainnet: CONFIRM_MAINNET,
     confirmPaid: CONFIRM_PAID,
+    wait: { kind: "flag" },
+    timeoutMs: {
+      kind: "integer",
+      min: 0,
+      max: MAX_SETTLEMENT_TIMEOUT_MS,
+    },
+    intervalMs: { kind: "integer", min: MIN_SETTLEMENT_INTERVAL_MS },
   },
   mindvault_export_receipts: {
     format: { kind: "enum", values: ["json", "csv", "ndjson"] },
@@ -402,6 +409,8 @@ export const TOOL_ARGUMENT_SPECS: Record<string, ToolArgumentSpec> = {
   },
   mindvault_verify_install: {},
   mindvault_recover_catalog_cache: {},
+  mindvault_wallet_balances: {},
+  mindvault_server_endpoints: {},
 };
 
 // ── Errors ────────────────────────────────────────────────────────────────────
