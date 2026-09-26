@@ -157,6 +157,10 @@ exports[`tool schema snapshots > mindvault_backup_state > annotations 1`] = `
 exports[`tool schema snapshots > mindvault_backup_state > input schema 1`] = `
 {
   "properties": {
+    "confirm": {
+      "description": "Required to write the encrypted recovery file. Omitted or false returns a safety preview.",
+      "type": "boolean",
+    },
     "passphrase": {
       "description": "Passphrase used to encrypt the backup (min 8 characters). Keep it offline.",
       "type": "string",
@@ -331,6 +335,12 @@ exports[`tool schema snapshots > mindvault_browse > output schema 1`] = `
               "null",
             ],
           },
+          "tags": {
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
           "title": {
             "type": [
               "string",
@@ -344,6 +354,7 @@ exports[`tool schema snapshots > mindvault_browse > output schema 1`] = `
           "price",
           "description",
           "accessUrl",
+          "tags",
         ],
         "type": "object",
       },
@@ -392,6 +403,16 @@ exports[`tool schema snapshots > mindvault_buy > input schema 1`] = `
       "description": "Optional dry-run flag. When true, validates the resource ID and shows intended network, endpoint, and required wallet state without submitting payment.",
       "type": "boolean",
     },
+    "intervalMs": {
+      "default": 2000,
+      "description": "Optional interval in milliseconds between settlement status polls when wait is true. Default 2000, minimum 200.",
+      "examples": [
+        500,
+        2000,
+      ],
+      "minimum": 200,
+      "type": "integer",
+    },
     "maxAutoPayUsdc": {
       "description": "Explicit per-call maximum automatic payment in USDC. Required when this resource costs more than MINDVAULT_MAX_AUTO_PAY_USDC; must be at least the advertised price.",
       "examples": [
@@ -407,6 +428,21 @@ exports[`tool schema snapshots > mindvault_buy > input schema 1`] = `
       ],
       "type": "string",
     },
+    "timeoutMs": {
+      "default": 60000,
+      "description": "Optional deadline in milliseconds for settlement confirmation when wait is true. Default 60000, inclusive maximum 300000.",
+      "examples": [
+        30000,
+        60000,
+      ],
+      "maximum": 300000,
+      "minimum": 0,
+      "type": "integer",
+    },
+    "wait": {
+      "description": "Optional flag. When true, wait and poll the payment transaction on Soroban until it settles (SUCCESS or FAILED) or the timeout elapses, returning a settlement confirmation block. Off by default, in which case the buy returns as soon as the payment response arrives.",
+      "type": "boolean",
+    },
   },
   "required": [
     "resourceId",
@@ -419,6 +455,7 @@ exports[`tool schema snapshots > mindvault_buy > output schema 1`] = `
 {
   "oneOf": [
     {
+      "description": "mindvault_buy result: the purchase diff plus a settlement-confirmation block describing how far the payment transaction got before returning.",
       "properties": {
         "after": {},
         "before": {},
@@ -434,6 +471,55 @@ exports[`tool schema snapshots > mindvault_buy > output schema 1`] = `
             "null",
           ],
         },
+        "settlement": {
+          "properties": {
+            "attempts": {
+              "type": "integer",
+            },
+            "message": {
+              "type": "string",
+            },
+            "polled": {
+              "type": "boolean",
+            },
+            "settled": {
+              "type": "boolean",
+            },
+            "skipped": {
+              "type": "boolean",
+            },
+            "status": {
+              "type": [
+                "string",
+                "null",
+              ],
+            },
+            "success": {
+              "type": "boolean",
+            },
+            "timedOut": {
+              "type": "boolean",
+            },
+            "txHash": {
+              "type": [
+                "string",
+                "null",
+              ],
+            },
+          },
+          "required": [
+            "polled",
+            "txHash",
+            "status",
+            "settled",
+            "success",
+            "timedOut",
+            "attempts",
+            "skipped",
+            "message",
+          ],
+          "type": "object",
+        },
         "txHash": {
           "type": [
             "string",
@@ -446,6 +532,7 @@ exports[`tool schema snapshots > mindvault_buy > output schema 1`] = `
         "after",
         "changedFields",
         "txHash",
+        "settlement",
       ],
       "type": "object",
     },
@@ -496,6 +583,234 @@ exports[`tool schema snapshots > mindvault_buy > output schema 1`] = `
       ],
       "type": "object",
     },
+  ],
+  "type": "object",
+}
+`;
+
+exports[`tool schema snapshots > mindvault_batch_catalog_lookup > annotations 1`] = `
+{
+  "destructiveHint": false,
+  "idempotentHint": true,
+  "readOnlyHint": true,
+  "title": "Batch Catalog Lookup",
+}
+`;
+
+exports[`tool schema snapshots > mindvault_batch_catalog_lookup > input schema 1`] = `
+{
+  "properties": {
+    "refetch": {
+      "description": "When true, skip the offline cache fallback and fail if the catalog API is unreachable. Default false (serve a labelled cached snapshot when offline).",
+      "type": "boolean",
+    },
+    "resourceIds": {
+      "description": "1–25 resource ids, from mindvault_browse or mindvault_search. A comma-separated string is also accepted. Duplicates are looked up once each.",
+      "examples": [
+        [
+          "cm7x8y9z",
+          "res-001",
+        ],
+      ],
+      "items": {
+        "type": "string",
+      },
+      "maxItems": 25,
+      "minItems": 1,
+      "type": "array",
+    },
+  },
+  "required": [
+    "resourceIds",
+  ],
+  "type": "object",
+}
+`;
+
+exports[`tool schema snapshots > mindvault_batch_catalog_lookup > output schema 1`] = `
+{
+  "properties": {
+    "foundCount": {
+      "type": "integer",
+    },
+    "items": {
+      "items": {
+        "properties": {
+          "accessUrl": {
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "found": {
+            "type": "boolean",
+          },
+          "id": {
+            "type": "string",
+          },
+          "price": {
+            "type": [
+              "string",
+              "number",
+              "null",
+            ],
+          },
+          "resourceType": {
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "title": {
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "verificationStatus": {
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+        },
+        "required": [
+          "id",
+          "found",
+          "title",
+          "price",
+          "verificationStatus",
+          "resourceType",
+          "accessUrl",
+        ],
+        "type": "object",
+      },
+      "type": "array",
+    },
+    "missing": {
+      "items": {
+        "type": "string",
+      },
+      "type": "array",
+    },
+    "notice": {
+      "type": [
+        "string",
+        "null",
+      ],
+    },
+    "requested": {
+      "type": "integer",
+    },
+    "truncated": {
+      "type": "boolean",
+    },
+  },
+  "required": [
+    "items",
+    "requested",
+    "foundCount",
+    "missing",
+    "notice",
+    "truncated",
+  ],
+  "type": "object",
+}
+`;
+
+exports[`tool schema snapshots > mindvault_preview_metadata_hash > annotations 1`] = `
+{
+  "destructiveHint": false,
+  "idempotentHint": true,
+  "readOnlyHint": true,
+  "title": "Preview Metadata Hash",
+}
+`;
+
+exports[`tool schema snapshots > mindvault_preview_metadata_hash > input schema 1`] = `
+{
+  "properties": {
+    "resourceId": {
+      "description": "The on-chain resource id to read (from mindvault_browse, mindvault_registry_list, or mindvault_publish). Letters, digits, dot, dash, or underscore.",
+      "examples": [
+        "cm7x8y9z",
+        "res-001",
+      ],
+      "type": "string",
+    },
+  },
+  "required": [
+    "resourceId",
+  ],
+  "type": "object",
+}
+`;
+
+exports[`tool schema snapshots > mindvault_preview_metadata_hash > output schema 1`] = `
+{
+  "properties": {
+    "pointer": {
+      "properties": {
+        "present": {
+          "type": "boolean",
+        },
+        "source": {
+          "type": [
+            "string",
+            "null",
+          ],
+        },
+      },
+      "required": [
+        "source",
+        "present",
+      ],
+      "type": "object",
+    },
+    "report": {
+      "properties": {
+        "algorithm": {
+          "type": [
+            "string",
+            "null",
+          ],
+        },
+        "canonical": {
+          "type": [
+            "string",
+            "null",
+          ],
+        },
+        "present": {
+          "type": "boolean",
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null",
+          ],
+        },
+        "valid": {
+          "type": "boolean",
+        },
+      },
+      "required": [
+        "present",
+        "valid",
+        "canonical",
+        "algorithm",
+        "reason",
+      ],
+      "type": "object",
+    },
+    "resourceId": {
+      "type": "string",
+    },
+  },
+  "required": [
+    "resourceId",
+    "pointer",
+    "report",
   ],
   "type": "object",
 }
@@ -620,6 +935,408 @@ exports[`tool schema snapshots > mindvault_check_state_permissions > input schem
 
 exports[`tool schema snapshots > mindvault_check_state_permissions > output schema 1`] = `null`;
 
+exports[`tool schema snapshots > mindvault_debug_bundle > annotations 1`] = `
+{
+  "destructiveHint": false,
+  "idempotentHint": true,
+  "readOnlyHint": true,
+  "title": "Export Debug Bundle",
+}
+`;
+
+exports[`tool schema snapshots > mindvault_debug_bundle > input schema 1`] = `
+{
+  "properties": {
+    "auditLogLines": {
+      "description": "Audit-log entries to include from the end of MINDVAULT_AUDIT_LOG_FILE (0–500, default 50). 0 omits the section.",
+      "examples": [
+        50,
+        200,
+      ],
+      "maximum": 500,
+      "minimum": 0,
+      "type": "integer",
+    },
+    "includeEnvironment": {
+      "description": "Include the MindVault-related environment variables with credential-like values masked. Default true; pass false to omit the section entirely.",
+      "examples": [
+        true,
+        false,
+      ],
+      "type": "boolean",
+    },
+  },
+  "required": [],
+  "type": "object",
+}
+`;
+
+exports[`tool schema snapshots > mindvault_debug_bundle > output schema 1`] = `
+{
+  "properties": {
+    "auditLog": {
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+        },
+        "entries": {
+          "items": {
+            "type": "object",
+          },
+          "type": "array",
+        },
+        "exists": {
+          "type": "boolean",
+        },
+        "filePath": {
+          "type": [
+            "string",
+            "null",
+          ],
+        },
+        "requested": {
+          "type": "integer",
+        },
+      },
+      "required": [
+        "enabled",
+        "filePath",
+        "exists",
+        "requested",
+        "entries",
+      ],
+      "type": "object",
+    },
+    "catalogCache": {
+      "properties": {
+        "maxAgeMs": {
+          "type": "integer",
+        },
+        "snapshot": {
+          "properties": {
+            "label": {
+              "type": [
+                "string",
+                "null",
+              ],
+            },
+            "present": {
+              "type": "boolean",
+            },
+            "resourceCount": {
+              "type": "integer",
+            },
+            "savedAt": {
+              "type": [
+                "string",
+                "null",
+              ],
+            },
+          },
+          "required": [
+            "present",
+            "savedAt",
+            "resourceCount",
+            "label",
+          ],
+          "type": "object",
+        },
+        "ttlMs": {
+          "type": "integer",
+        },
+      },
+      "required": [
+        "ttlMs",
+        "maxAgeMs",
+        "snapshot",
+      ],
+      "type": "object",
+    },
+    "config": {
+      "description": "The fully resolved configuration (env var, network preset, or default).",
+      "properties": {
+        "baseUrl": {
+          "type": "string",
+        },
+        "horizonUrl": {
+          "type": "string",
+        },
+        "registryContractId": {
+          "type": "string",
+        },
+        "registryNetworkPassphrase": {
+          "type": "string",
+        },
+        "sorobanRpcUrl": {
+          "type": "string",
+        },
+        "sponsoredAccountUrl": {
+          "type": "string",
+        },
+        "stellarNetwork": {
+          "type": "string",
+        },
+        "x402Network": {
+          "type": "string",
+        },
+      },
+      "required": [
+        "stellarNetwork",
+        "x402Network",
+        "baseUrl",
+        "registryContractId",
+      ],
+      "type": "object",
+    },
+    "diagnostics": {
+      "items": {
+        "properties": {
+          "expected": {
+            "type": "string",
+          },
+          "message": {
+            "type": "string",
+          },
+          "severity": {
+            "enum": [
+              "error",
+              "warning",
+            ],
+            "type": "string",
+          },
+          "variable": {
+            "type": "string",
+          },
+        },
+        "required": [
+          "variable",
+          "severity",
+          "message",
+        ],
+        "type": "object",
+      },
+      "type": "array",
+    },
+    "environment": {
+      "additionalProperties": {
+        "type": "string",
+      },
+      "description": "MindVault-related environment variables; credential-like names carry "[REDACTED]". Null when includeEnvironment is false.",
+      "type": [
+        "object",
+        "null",
+      ],
+    },
+    "generatedAt": {
+      "description": "ISO-8601 instant the bundle was produced.",
+      "type": "string",
+    },
+    "install": {
+      "properties": {
+        "checks": {
+          "items": {
+            "properties": {
+              "detail": {
+                "type": "string",
+              },
+              "name": {
+                "type": "string",
+              },
+              "ok": {
+                "type": "boolean",
+              },
+            },
+            "required": [
+              "name",
+              "ok",
+              "detail",
+            ],
+            "type": "object",
+          },
+          "type": "array",
+        },
+        "ok": {
+          "type": "boolean",
+        },
+      },
+      "required": [
+        "ok",
+        "checks",
+      ],
+      "type": "object",
+    },
+    "metrics": {
+      "description": "The mindvault_metrics snapshot; enabled=false when metrics are off.",
+      "type": "object",
+    },
+    "profiles": {
+      "properties": {
+        "active": {
+          "type": "string",
+        },
+        "entries": {
+          "items": {
+            "properties": {
+              "active": {
+                "type": "boolean",
+              },
+              "hasApiKey": {
+                "type": "boolean",
+              },
+              "hasWallet": {
+                "type": "boolean",
+              },
+              "name": {
+                "type": "string",
+              },
+              "publicKey": {
+                "type": [
+                  "string",
+                  "null",
+                ],
+              },
+            },
+            "required": [
+              "name",
+              "active",
+              "hasWallet",
+              "publicKey",
+              "hasApiKey",
+            ],
+            "type": "object",
+          },
+          "type": "array",
+        },
+      },
+      "required": [
+        "active",
+        "entries",
+      ],
+      "type": "object",
+    },
+    "runtime": {
+      "properties": {
+        "arch": {
+          "type": "string",
+        },
+        "mockMode": {
+          "type": "boolean",
+        },
+        "nodeVersion": {
+          "type": "string",
+        },
+        "platform": {
+          "type": "string",
+        },
+        "readOnlyMode": {
+          "type": "boolean",
+        },
+        "serverVersion": {
+          "type": "string",
+        },
+      },
+      "required": [
+        "serverVersion",
+        "nodeVersion",
+        "platform",
+        "arch",
+        "mockMode",
+        "readOnlyMode",
+      ],
+      "type": "object",
+    },
+    "sanitized": {
+      "description": "What was withheld and the rules that decided it.",
+      "properties": {
+        "maskedEnvironment": {
+          "items": {
+            "type": "string",
+          },
+          "type": "array",
+        },
+        "rules": {
+          "items": {
+            "type": "string",
+          },
+          "type": "array",
+        },
+      },
+      "required": [
+        "maskedEnvironment",
+        "rules",
+      ],
+      "type": "object",
+    },
+    "schema": {
+      "const": "mindvault.debug-bundle/v1",
+      "type": "string",
+    },
+    "state": {
+      "properties": {
+        "dir": {
+          "type": "string",
+        },
+        "file": {
+          "type": "string",
+        },
+        "permissions": {
+          "properties": {
+            "exists": {
+              "type": "boolean",
+            },
+            "expectedMode": {
+              "type": "string",
+            },
+            "isSafe": {
+              "type": "boolean",
+            },
+            "message": {
+              "type": "string",
+            },
+            "mode": {
+              "type": [
+                "string",
+                "null",
+              ],
+            },
+          },
+          "required": [
+            "exists",
+            "mode",
+            "expectedMode",
+            "isSafe",
+            "message",
+          ],
+          "type": "object",
+        },
+      },
+      "required": [
+        "dir",
+        "file",
+        "permissions",
+      ],
+      "type": "object",
+    },
+  },
+  "required": [
+    "schema",
+    "generatedAt",
+    "sanitized",
+    "runtime",
+    "config",
+    "environment",
+    "diagnostics",
+    "install",
+    "profiles",
+    "state",
+    "metrics",
+    "catalogCache",
+    "auditLog",
+  ],
+  "type": "object",
+}
+`;
+
 exports[`tool schema snapshots > mindvault_export_receipts > annotations 1`] = `
 {
   "destructiveHint": false,
@@ -633,14 +1350,16 @@ exports[`tool schema snapshots > mindvault_export_receipts > input schema 1`] = 
 {
   "properties": {
     "format": {
-      "description": "Output format. "json" (default) returns the receipts array; "csv" additionally renders the same rows as an RFC 4180 document in the envelope's csv field.",
+      "description": "Output format. "json" (default) returns the receipts array; "csv" additionally renders the same rows as an RFC 4180 document in the envelope's csv field; "ndjson" renders each row as a JSON object on its own line in the envelope's ndjson field.",
       "enum": [
         "json",
         "csv",
+        "ndjson",
       ],
       "examples": [
         "json",
         "csv",
+        "ndjson",
       ],
       "type": "string",
     },
@@ -754,11 +1473,16 @@ exports[`tool schema snapshots > mindvault_export_receipts > output schema 1`] =
       "enum": [
         "json",
         "csv",
+        "ndjson",
       ],
       "type": "string",
     },
     "generatedAt": {
       "description": "ISO-8601 instant the export was produced.",
+      "type": "string",
+    },
+    "ndjson": {
+      "description": "Newline-Delimited JSON document of the same rows. Present only when format is "ndjson".",
       "type": "string",
     },
     "receipts": {
@@ -838,6 +1562,202 @@ exports[`tool schema snapshots > mindvault_export_receipts > output schema 1`] =
     "totalAmount",
     "currency",
     "receipts",
+  ],
+  "type": "object",
+}
+`;
+
+exports[`tool schema snapshots > mindvault_fee_config > annotations 1`] = `
+{
+  "destructiveHint": false,
+  "idempotentHint": true,
+  "readOnlyHint": true,
+  "title": "Fee Config",
+}
+`;
+
+exports[`tool schema snapshots > mindvault_fee_config > input schema 1`] = `
+{
+  "properties": {},
+  "required": [],
+  "type": "object",
+}
+`;
+
+exports[`tool schema snapshots > mindvault_fee_config > output schema 1`] = `
+{
+  "properties": {
+    "configured": {
+      "type": "boolean",
+    },
+    "contract": {},
+    "creatorPayoutBps": {
+      "type": "integer",
+    },
+    "creatorPayoutPercent": {
+      "type": "string",
+    },
+    "feeRecipient": {
+      "type": [
+        "string",
+        "null",
+      ],
+    },
+    "message": {
+      "type": "string",
+    },
+    "network": {},
+    "platformFeeBps": {
+      "type": "integer",
+    },
+    "royaltyBps": {
+      "type": "integer",
+    },
+    "rpc": {},
+    "source": {
+      "type": "string",
+    },
+    "totalFeeBps": {
+      "type": "integer",
+    },
+  },
+  "required": [
+    "source",
+    "configured",
+    "contract",
+  ],
+  "type": "object",
+}
+`;
+
+exports[`tool schema snapshots > mindvault_freeze > annotations 1`] = `
+{
+  "destructiveHint": true,
+  "idempotentHint": true,
+  "readOnlyHint": false,
+  "title": "Freeze Metadata",
+}
+`;
+
+exports[`tool schema snapshots > mindvault_freeze > input schema 1`] = `
+{
+  "properties": {
+    "confirm": {
+      "description": "Required exact confirmation string. Pass "freeze_metadata" to perform the irreversible freeze.",
+      "examples": [
+        "freeze_metadata",
+      ],
+      "type": "string",
+    },
+    "confirmMainnet": {
+      "description": "Required on mainnet (or set MINDVAULT_ALLOW_MAINNET=1). Explicitly confirm this mutation on the public Stellar network.",
+      "type": "boolean",
+    },
+    "confirmPaid": {
+      "description": "Required when the server runs with MINDVAULT_CONFIRM_PAID_OPERATIONS=usdc or =all. Explicitly confirm that this call may spend from the agent wallet. Ignored when the policy is off (the default) and on dry runs.",
+      "type": "boolean",
+    },
+    "resourceId": {
+      "description": "The resource ID whose metadata should be frozen. Example: 'cm7x8y9z'",
+      "examples": [
+        "cm7x8y9z",
+        "res-001",
+      ],
+      "type": "string",
+    },
+  },
+  "required": [
+    "resourceId",
+    "confirm",
+  ],
+  "type": "object",
+}
+`;
+
+exports[`tool schema snapshots > mindvault_freeze > output schema 1`] = `
+{
+  "oneOf": [
+    {
+      "properties": {
+        "listed": {
+          "type": "boolean",
+        },
+        "metadata": {
+          "type": "string",
+        },
+        "newCreator": {
+          "type": "string",
+        },
+        "price": {
+          "type": "string",
+        },
+        "resourceId": {
+          "type": "string",
+        },
+        "status": {
+          "type": "string",
+        },
+        "txHash": {
+          "type": [
+            "string",
+            "null",
+          ],
+        },
+      },
+      "required": [
+        "status",
+        "resourceId",
+        "txHash",
+      ],
+      "type": "object",
+    },
+    {
+      "properties": {
+        "intentions": {
+          "type": "object",
+        },
+        "mode": {
+          "const": "dry-run",
+          "type": "string",
+        },
+        "operation": {
+          "type": "string",
+        },
+        "steps": {
+          "items": {
+            "type": "string",
+          },
+          "type": "array",
+        },
+        "validation": {
+          "type": "object",
+        },
+      },
+      "required": [
+        "mode",
+        "operation",
+        "validation",
+        "intentions",
+        "steps",
+      ],
+      "type": "object",
+    },
+    {
+      "properties": {
+        "message": {
+          "type": "string",
+        },
+        "status": {
+          "const": "text",
+          "type": "string",
+        },
+      },
+      "required": [
+        "status",
+        "message",
+      ],
+      "type": "object",
+    },
   ],
   "type": "object",
 }
@@ -971,6 +1891,25 @@ exports[`tool schema snapshots > mindvault_list_profiles > output schema 1`] = `
 }
 `;
 
+exports[`tool schema snapshots > mindvault_mainnet_banner > annotations 1`] = `
+{
+  "destructiveHint": false,
+  "idempotentHint": true,
+  "readOnlyHint": true,
+  "title": "Mainnet Session Banner",
+}
+`;
+
+exports[`tool schema snapshots > mindvault_mainnet_banner > input schema 1`] = `
+{
+  "properties": {},
+  "required": [],
+  "type": "object",
+}
+`;
+
+exports[`tool schema snapshots > mindvault_mainnet_banner > output schema 1`] = `null`;
+
 exports[`tool schema snapshots > mindvault_metrics > annotations 1`] = `
 {
   "destructiveHint": false,
@@ -983,6 +1922,19 @@ exports[`tool schema snapshots > mindvault_metrics > annotations 1`] = `
 exports[`tool schema snapshots > mindvault_metrics > input schema 1`] = `
 {
   "properties": {
+    "format": {
+      "default": "json",
+      "description": "Metrics export format. json (default) returns the snapshot object; otlp returns the same data as an OTLP/JSON ExportMetricsServiceRequest payload (a resourceMetrics envelope ready for an OpenTelemetry collector).",
+      "enum": [
+        "json",
+        "otlp",
+      ],
+      "examples": [
+        "json",
+        "otlp",
+      ],
+      "type": "string",
+    },
     "reset": {
       "description": "Clear all counters after returning the current snapshot (default: false leaves counters intact). Example: true resets metrics after reading.",
       "examples": [
@@ -999,37 +1951,49 @@ exports[`tool schema snapshots > mindvault_metrics > input schema 1`] = `
 
 exports[`tool schema snapshots > mindvault_metrics > output schema 1`] = `
 {
-  "properties": {
-    "enabled": {
-      "type": "boolean",
-    },
-    "message": {
-      "type": "string",
-    },
-    "payments": {
-      "type": "object",
-    },
-    "since": {
-      "type": [
-        "string",
-        "null",
+  "oneOf": [
+    {
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+        },
+        "message": {
+          "type": "string",
+        },
+        "payments": {
+          "type": "object",
+        },
+        "since": {
+          "type": [
+            "string",
+            "null",
+          ],
+        },
+        "toolDurationBudgetMs": {
+          "type": [
+            "integer",
+            "null",
+          ],
+        },
+        "tools": {
+          "type": "object",
+        },
+        "totals": {
+          "type": "object",
+        },
+      },
+      "required": [
+        "enabled",
       ],
+      "type": "object",
     },
-    "toolDurationBudgetMs": {
-      "type": [
-        "integer",
-        "null",
+    {
+      "description": "The same snapshot rendered as an OTLP/JSON ExportMetricsServiceRequest body when format=otlp.",
+      "required": [
+        "resourceMetrics",
       ],
-    },
-    "tools": {
       "type": "object",
     },
-    "totals": {
-      "type": "object",
-    },
-  },
-  "required": [
-    "enabled",
   ],
   "type": "object",
 }
@@ -1148,6 +2112,25 @@ exports[`tool schema snapshots > mindvault_preview > output schema 1`] = `
   "type": "object",
 }
 `;
+
+exports[`tool schema snapshots > mindvault_prewarm_catalog > annotations 1`] = `
+{
+  "destructiveHint": false,
+  "idempotentHint": true,
+  "readOnlyHint": true,
+  "title": "Pre-warm Catalog Cache",
+}
+`;
+
+exports[`tool schema snapshots > mindvault_prewarm_catalog > input schema 1`] = `
+{
+  "properties": {},
+  "required": [],
+  "type": "object",
+}
+`;
+
+exports[`tool schema snapshots > mindvault_prewarm_catalog > output schema 1`] = `null`;
 
 exports[`tool schema snapshots > mindvault_publish > annotations 1`] = `
 {
@@ -1296,6 +2279,166 @@ exports[`tool schema snapshots > mindvault_publish > output schema 1`] = `
       ],
       "type": "object",
     },
+  ],
+  "type": "object",
+}
+`;
+
+exports[`tool schema snapshots > mindvault_publish_batch > annotations 1`] = `
+{
+  "destructiveHint": false,
+  "idempotentHint": false,
+  "readOnlyHint": false,
+  "title": "Publish Batch",
+}
+`;
+
+exports[`tool schema snapshots > mindvault_publish_batch > input schema 1`] = `
+{
+  "properties": {
+    "confirmMainnet": {
+      "description": "Required on mainnet (or set MINDVAULT_ALLOW_MAINNET=1). Explicitly confirm this mutation/payment on the public Stellar network.",
+      "type": "boolean",
+    },
+    "confirmPaid": {
+      "description": "Required when the server runs with MINDVAULT_CONFIRM_PAID_OPERATIONS=usdc or =all. Explicitly confirm that this call may spend from the agent wallet. Ignored when the policy is off (the default) and on dry runs.",
+      "type": "boolean",
+    },
+    "items": {
+      "description": "List of resources to publish (1–10 items). Each item must include title, price, and externalUrl.",
+      "items": {
+        "properties": {
+          "description": {
+            "description": "Optional description (max 2048 characters).",
+            "type": "string",
+          },
+          "externalUrl": {
+            "description": "Public http(s) URL buyers receive after payment.",
+            "examples": [
+              "https://example.com/data.json",
+            ],
+            "type": "string",
+          },
+          "price": {
+            "description": "Price in USDC as a decimal string, e.g. '5.00'.",
+            "examples": [
+              "1.00",
+              "5.00",
+              "10.00",
+            ],
+            "type": "string",
+          },
+          "title": {
+            "description": "Resource title (1–256 characters).",
+            "examples": [
+              "My Dataset",
+              "Research Paper #1",
+            ],
+            "type": "string",
+          },
+        },
+        "required": [
+          "title",
+          "price",
+          "externalUrl",
+        ],
+        "type": "object",
+      },
+      "maxItems": 10,
+      "minItems": 1,
+      "type": "array",
+    },
+  },
+  "required": [
+    "items",
+  ],
+  "type": "object",
+}
+`;
+
+exports[`tool schema snapshots > mindvault_publish_batch > output schema 1`] = `
+{
+  "properties": {
+    "errored": {
+      "type": "number",
+    },
+    "items": {
+      "items": {
+        "properties": {
+          "error": {
+            "type": "string",
+          },
+          "flags": {
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
+          "id": {
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "index": {
+            "type": "number",
+          },
+          "onchainStatus": {
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "title": {
+            "type": "string",
+          },
+          "verificationStatus": {
+            "enum": [
+              "approved",
+              "rejected",
+              "error",
+            ],
+            "type": "string",
+          },
+        },
+        "required": [
+          "index",
+          "title",
+          "id",
+          "verificationStatus",
+          "onchainStatus",
+        ],
+        "type": "object",
+      },
+      "type": "array",
+    },
+    "onchainStatus": {
+      "type": "string",
+    },
+    "rejected": {
+      "type": "number",
+    },
+    "requested": {
+      "type": "number",
+    },
+    "txHash": {
+      "type": [
+        "string",
+        "null",
+      ],
+    },
+    "verified": {
+      "type": "number",
+    },
+  },
+  "required": [
+    "requested",
+    "verified",
+    "rejected",
+    "errored",
+    "onchainStatus",
+    "txHash",
+    "items",
   ],
   "type": "object",
 }
@@ -1520,6 +2663,131 @@ exports[`tool schema snapshots > mindvault_publish_status > output schema 1`] = 
     "settled",
     "timedOut",
     "message",
+  ],
+  "type": "object",
+}
+`;
+
+exports[`tool schema snapshots > mindvault_publish_template > annotations 1`] = `
+{
+  "destructiveHint": false,
+  "idempotentHint": true,
+  "readOnlyHint": true,
+  "title": "Publish Template",
+}
+`;
+
+exports[`tool schema snapshots > mindvault_publish_template > input schema 1`] = `
+{
+  "properties": {
+    "metadataPointer": {
+      "description": "Optional metadata pointer override. When supplied, replaces the type-default format. Must start with ipfs://, ar://, http(s)://, sha256:, sha-256:, or 0x.",
+      "examples": [
+        "ipfs://QmXyz...",
+        "sha256:abc123...",
+      ],
+      "type": "string",
+    },
+    "price": {
+      "description": "Optional USDC price override (decimal string). Overrides the suggested price for the chosen resource type.",
+      "examples": [
+        "1.00",
+        "5.00",
+        "10.00",
+      ],
+      "type": "string",
+    },
+    "resourceType": {
+      "description": "Known resource type to generate defaults for. Each type has its own canonical tags, metadata pointer format, suggested price, and description template.",
+      "enum": [
+        "dataset",
+        "code",
+        "prompt",
+        "model",
+      ],
+      "examples": [
+        "dataset",
+        "code",
+        "prompt",
+        "model",
+      ],
+      "type": "string",
+    },
+    "tags": {
+      "description": "Optional tag override (replaces, not merges, the type-default tags). 1–8 lowercase tags, each 1–32 characters.",
+      "examples": [
+        [
+          "dataset",
+          "finance",
+          "time-series",
+        ],
+      ],
+      "items": {
+        "type": "string",
+      },
+      "type": "array",
+    },
+    "title": {
+      "description": "Optional title to include in the returned spec (1–256 characters).",
+      "examples": [
+        "My Training Dataset",
+        "GPT-4 System Prompt Library",
+      ],
+      "type": "string",
+    },
+  },
+  "required": [
+    "resourceType",
+  ],
+  "type": "object",
+}
+`;
+
+exports[`tool schema snapshots > mindvault_publish_template > output schema 1`] = `
+{
+  "properties": {
+    "description": {
+      "type": "string",
+    },
+    "metadataPointer": {
+      "type": "string",
+    },
+    "nextSteps": {
+      "items": {
+        "type": "string",
+      },
+      "type": "array",
+    },
+    "price": {
+      "type": "string",
+    },
+    "resourceType": {
+      "enum": [
+        "dataset",
+        "code",
+        "prompt",
+        "model",
+      ],
+      "type": "string",
+    },
+    "tags": {
+      "items": {
+        "type": "string",
+      },
+      "type": "array",
+    },
+    "title": {
+      "type": "string",
+    },
+  },
+  "required": [
+    "resourceType",
+    "title",
+    "metadataPointer",
+    "tags",
+    "price",
+    "description",
+    "nextSteps",
   ],
   "type": "object",
 }
@@ -1791,6 +3059,63 @@ exports[`tool schema snapshots > mindvault_register_onchain > output schema 1`] 
 }
 `;
 
+exports[`tool schema snapshots > mindvault_registry_count > annotations 1`] = `
+{
+  "destructiveHint": false,
+  "idempotentHint": true,
+  "readOnlyHint": true,
+  "title": "Registry Count",
+}
+`;
+
+exports[`tool schema snapshots > mindvault_registry_count > input schema 1`] = `
+{
+  "properties": {
+    "creator": {
+      "description": "Optional Stellar public key (G…). When supplied, also returns the number of resources currently owned by that address (creator_resource_count). Omit to return only the global counts.",
+      "examples": [
+        "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
+      ],
+      "type": "string",
+    },
+  },
+  "required": [],
+  "type": "object",
+}
+`;
+
+exports[`tool schema snapshots > mindvault_registry_count > output schema 1`] = `
+{
+  "properties": {
+    "contract": {},
+    "count": {
+      "type": "integer",
+    },
+    "creator": {
+      "type": "string",
+    },
+    "creatorCount": {
+      "type": "integer",
+    },
+    "listedCount": {
+      "type": "integer",
+    },
+    "network": {},
+    "rpc": {},
+    "source": {
+      "type": "string",
+    },
+  },
+  "required": [
+    "source",
+    "count",
+    "listedCount",
+    "contract",
+  ],
+  "type": "object",
+}
+`;
+
 exports[`tool schema snapshots > mindvault_registry_health > annotations 1`] = `
 {
   "destructiveHint": false,
@@ -2048,6 +3373,58 @@ exports[`tool schema snapshots > mindvault_reset > input schema 1`] = `
 
 exports[`tool schema snapshots > mindvault_reset > output schema 1`] = `null`;
 
+exports[`tool schema snapshots > mindvault_resource_change_log > annotations 1`] = `
+{
+  "destructiveHint": false,
+  "idempotentHint": true,
+  "readOnlyHint": true,
+  "title": "Resource Change Log",
+}
+`;
+
+exports[`tool schema snapshots > mindvault_resource_change_log > input schema 1`] = `
+{
+  "properties": {
+    "resourceId": {
+      "description": "Resource identifier to inspect.",
+      "type": "string",
+    },
+  },
+  "required": [
+    "resourceId",
+  ],
+  "type": "object",
+}
+`;
+
+exports[`tool schema snapshots > mindvault_resource_change_log > output schema 1`] = `null`;
+
+exports[`tool schema snapshots > mindvault_resource_provenance > annotations 1`] = `
+{
+  "destructiveHint": false,
+  "idempotentHint": true,
+  "readOnlyHint": true,
+  "title": "Resource Provenance",
+}
+`;
+
+exports[`tool schema snapshots > mindvault_resource_provenance > input schema 1`] = `
+{
+  "properties": {
+    "resourceId": {
+      "description": "Resource identifier to audit.",
+      "type": "string",
+    },
+  },
+  "required": [
+    "resourceId",
+  ],
+  "type": "object",
+}
+`;
+
+exports[`tool schema snapshots > mindvault_resource_provenance > output schema 1`] = `null`;
+
 exports[`tool schema snapshots > mindvault_restore_state > annotations 1`] = `
 {
   "destructiveHint": true,
@@ -2110,6 +3487,142 @@ exports[`tool schema snapshots > mindvault_rotate_publisher_key > input schema 1
 `;
 
 exports[`tool schema snapshots > mindvault_rotate_publisher_key > output schema 1`] = `null`;
+
+exports[`tool schema snapshots > mindvault_royalty > annotations 1`] = `
+{
+  "destructiveHint": false,
+  "idempotentHint": true,
+  "readOnlyHint": false,
+  "title": "Set Royalty Recipient",
+}
+`;
+
+exports[`tool schema snapshots > mindvault_royalty > input schema 1`] = `
+{
+  "properties": {
+    "clear": {
+      "description": "When true, clear the resource-specific royalty recipient and use the registry default.",
+      "type": "boolean",
+    },
+    "confirmMainnet": {
+      "description": "Required on mainnet (or set MINDVAULT_ALLOW_MAINNET=1). Explicitly confirm this mutation on the public Stellar network.",
+      "type": "boolean",
+    },
+    "confirmPaid": {
+      "description": "Required when the server runs with MINDVAULT_CONFIRM_PAID_OPERATIONS=usdc or =all. Explicitly confirm that this call may spend from the agent wallet. Ignored when the policy is off (the default) and on dry runs.",
+      "type": "boolean",
+    },
+    "resourceId": {
+      "description": "The resource ID to configure royalties for. Example: 'cm7x8y9z'",
+      "examples": [
+        "cm7x8y9z",
+        "res-001",
+      ],
+      "type": "string",
+    },
+    "royaltyRecipient": {
+      "description": "The Stellar public key (G... , 56 chars) to receive royalties. Omit when clear is true.",
+      "examples": [
+        "GA6HCMBLTZS5VYYBCATRBRZ3BZJMAFUDKYYF6AH6MVCMGWMRDNSWJPIH",
+      ],
+      "type": "string",
+    },
+  },
+  "required": [
+    "resourceId",
+  ],
+  "type": "object",
+}
+`;
+
+exports[`tool schema snapshots > mindvault_royalty > output schema 1`] = `
+{
+  "oneOf": [
+    {
+      "properties": {
+        "listed": {
+          "type": "boolean",
+        },
+        "metadata": {
+          "type": "string",
+        },
+        "newCreator": {
+          "type": "string",
+        },
+        "price": {
+          "type": "string",
+        },
+        "resourceId": {
+          "type": "string",
+        },
+        "status": {
+          "type": "string",
+        },
+        "txHash": {
+          "type": [
+            "string",
+            "null",
+          ],
+        },
+      },
+      "required": [
+        "status",
+        "resourceId",
+        "txHash",
+      ],
+      "type": "object",
+    },
+    {
+      "properties": {
+        "intentions": {
+          "type": "object",
+        },
+        "mode": {
+          "const": "dry-run",
+          "type": "string",
+        },
+        "operation": {
+          "type": "string",
+        },
+        "steps": {
+          "items": {
+            "type": "string",
+          },
+          "type": "array",
+        },
+        "validation": {
+          "type": "object",
+        },
+      },
+      "required": [
+        "mode",
+        "operation",
+        "validation",
+        "intentions",
+        "steps",
+      ],
+      "type": "object",
+    },
+    {
+      "properties": {
+        "message": {
+          "type": "string",
+        },
+        "status": {
+          "const": "text",
+          "type": "string",
+        },
+      },
+      "required": [
+        "status",
+        "message",
+      ],
+      "type": "object",
+    },
+  ],
+  "type": "object",
+}
+`;
 
 exports[`tool schema snapshots > mindvault_search > annotations 1`] = `
 {
@@ -2271,6 +3784,12 @@ exports[`tool schema snapshots > mindvault_search > output schema 1`] = `
               "null",
             ],
           },
+          "tags": {
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
           "title": {
             "type": [
               "string",
@@ -2284,6 +3803,7 @@ exports[`tool schema snapshots > mindvault_search > output schema 1`] = `
           "price",
           "description",
           "accessUrl",
+          "tags",
         ],
         "type": "object",
       },
@@ -2303,6 +3823,110 @@ exports[`tool schema snapshots > mindvault_search > output schema 1`] = `
     "items",
     "notice",
     "truncated",
+  ],
+  "type": "object",
+}
+`;
+
+exports[`tool schema snapshots > mindvault_server_endpoints > annotations 1`] = `
+{
+  "destructiveHint": false,
+  "idempotentHint": true,
+  "readOnlyHint": true,
+  "title": "Server Endpoints",
+}
+`;
+
+exports[`tool schema snapshots > mindvault_server_endpoints > input schema 1`] = `
+{
+  "properties": {},
+  "required": [],
+  "type": "object",
+}
+`;
+
+exports[`tool schema snapshots > mindvault_server_endpoints > output schema 1`] = `
+{
+  "properties": {
+    "baseUrl": {
+      "type": "string",
+    },
+    "endpointCount": {
+      "type": "integer",
+    },
+    "message": {
+      "type": "string",
+    },
+    "openapi": {
+      "type": [
+        "string",
+        "null",
+      ],
+    },
+    "operations": {
+      "items": {
+        "properties": {
+          "method": {
+            "type": "string",
+          },
+          "operationId": {
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "path": {
+            "type": "string",
+          },
+          "summary": {
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "tags": {
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
+        },
+        "required": [
+          "method",
+          "path",
+          "operationId",
+          "tags",
+          "summary",
+        ],
+        "type": "object",
+      },
+      "type": "array",
+    },
+    "paths": {
+      "items": {
+        "type": "string",
+      },
+      "type": "array",
+    },
+    "server": {
+      "type": [
+        "object",
+        "null",
+      ],
+    },
+    "source": {
+      "type": "string",
+    },
+  },
+  "required": [
+    "source",
+    "baseUrl",
+    "openapi",
+    "server",
+    "endpointCount",
+    "operations",
+    "paths",
+    "message",
   ],
   "type": "object",
 }
@@ -2593,6 +4217,10 @@ exports[`tool schema snapshots > mindvault_set_tags > input schema 1`] = `
       "description": "Required on mainnet (or set MINDVAULT_ALLOW_MAINNET=1). Explicitly confirm this mutation on the public Stellar network.",
       "type": "boolean",
     },
+    "confirmPaid": {
+      "description": "Required when the server runs with MINDVAULT_CONFIRM_PAID_OPERATIONS=usdc or =all. Explicitly confirm that this call may spend from the agent wallet. Ignored when the policy is off (the default) and on dry runs.",
+      "type": "boolean",
+    },
     "resourceId": {
       "description": "The on-chain resource ID to update tags for (from mindvault_publish or mindvault_browse).",
       "examples": [
@@ -2682,6 +4310,41 @@ exports[`tool schema snapshots > mindvault_setup_wallet > output schema 1`] = `
   "type": "object",
 }
 `;
+
+exports[`tool schema snapshots > mindvault_switch_network_profile > annotations 1`] = `
+{
+  "destructiveHint": false,
+  "idempotentHint": true,
+  "readOnlyHint": false,
+  "title": "Switch Network Profile",
+}
+`;
+
+exports[`tool schema snapshots > mindvault_switch_network_profile > input schema 1`] = `
+{
+  "properties": {
+    "name": {
+      "description": "Profile name to activate.",
+      "type": "string",
+    },
+    "network": {
+      "description": "Stellar network for this profile.",
+      "enum": [
+        "testnet",
+        "mainnet",
+      ],
+      "type": "string",
+    },
+  },
+  "required": [
+    "name",
+    "network",
+  ],
+  "type": "object",
+}
+`;
+
+exports[`tool schema snapshots > mindvault_switch_network_profile > output schema 1`] = `null`;
 
 exports[`tool schema snapshots > mindvault_transfer_ownership > annotations 1`] = `
 {
@@ -3091,6 +4754,103 @@ exports[`tool schema snapshots > mindvault_use_profile > output schema 1`] = `
 }
 `;
 
+exports[`tool schema snapshots > mindvault_verify_attestation > annotations 1`] = `
+{
+  "destructiveHint": false,
+  "idempotentHint": true,
+  "readOnlyHint": true,
+  "title": "Verify Attestation",
+}
+`;
+
+exports[`tool schema snapshots > mindvault_verify_attestation > input schema 1`] = `
+{
+  "properties": {
+    "attestationHash": {
+      "description": "The attestation hash for the content received, exactly as supplied by the verifier (maximum 64 characters).",
+      "examples": [
+        "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+      ],
+      "maxLength": 64,
+      "minLength": 1,
+      "type": "string",
+    },
+    "resourceId": {
+      "description": "The on-chain resource ID whose registered attestation hash should be checked.",
+      "examples": [
+        "cm7x8y9z",
+      ],
+      "maxLength": 24,
+      "minLength": 1,
+      "pattern": "^[a-z0-9]+$",
+      "type": "string",
+    },
+  },
+  "required": [
+    "resourceId",
+    "attestationHash",
+  ],
+  "type": "object",
+}
+`;
+
+exports[`tool schema snapshots > mindvault_verify_attestation > output schema 1`] = `
+{
+  "properties": {
+    "contract": {
+      "type": "string",
+    },
+    "expectedAttestationHash": {
+      "type": "string",
+    },
+    "matches": {
+      "type": "boolean",
+    },
+    "network": {
+      "type": [
+        "string",
+        "null",
+      ],
+    },
+    "registeredAttestationHash": {
+      "type": [
+        "string",
+        "null",
+      ],
+    },
+    "resourceId": {
+      "type": "string",
+    },
+    "rpc": {
+      "type": [
+        "string",
+        "null",
+      ],
+    },
+    "source": {
+      "type": "string",
+    },
+    "summary": {
+      "type": "string",
+    },
+    "verified": {
+      "type": "boolean",
+    },
+  },
+  "required": [
+    "source",
+    "resourceId",
+    "expectedAttestationHash",
+    "registeredAttestationHash",
+    "matches",
+    "verified",
+    "summary",
+    "contract",
+  ],
+  "type": "object",
+}
+`;
+
 exports[`tool schema snapshots > mindvault_verify_install > annotations 1`] = `
 {
   "destructiveHint": false,
@@ -3109,6 +4869,225 @@ exports[`tool schema snapshots > mindvault_verify_install > input schema 1`] = `
 `;
 
 exports[`tool schema snapshots > mindvault_verify_install > output schema 1`] = `null`;
+
+exports[`tool schema snapshots > mindvault_wallet_balances > annotations 1`] = `
+{
+  "destructiveHint": false,
+  "idempotentHint": true,
+  "readOnlyHint": true,
+  "title": "Wallet Balances",
+}
+`;
+
+exports[`tool schema snapshots > mindvault_wallet_balances > input schema 1`] = `
+{
+  "properties": {},
+  "required": [],
+  "type": "object",
+}
+`;
+
+exports[`tool schema snapshots > mindvault_wallet_balances > output schema 1`] = `
+{
+  "properties": {
+    "agents": {
+      "items": {
+        "properties": {
+          "active": {
+            "type": [
+              "boolean",
+              "null",
+            ],
+          },
+          "address": {
+            "type": "string",
+          },
+          "note": {
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "profile": {
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "publisherRegistered": {
+            "type": [
+              "boolean",
+              "null",
+            ],
+          },
+          "usdcBalance": {
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "usdcStatus": {
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "xlmAvailable": {
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "xlmBalance": {
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "xlmReserve": {
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+        },
+        "required": [
+          "profile",
+          "address",
+          "active",
+          "publisherRegistered",
+          "xlmBalance",
+          "xlmReserve",
+          "xlmAvailable",
+          "usdcBalance",
+          "usdcStatus",
+          "note",
+        ],
+        "type": "object",
+      },
+      "type": "array",
+    },
+    "count": {
+      "type": "integer",
+    },
+    "message": {
+      "type": "string",
+    },
+    "platform": {
+      "properties": {
+        "active": {
+          "type": [
+            "boolean",
+            "null",
+          ],
+        },
+        "address": {
+          "type": "string",
+        },
+        "configured": {
+          "type": "boolean",
+        },
+        "note": {
+          "type": [
+            "string",
+            "null",
+          ],
+        },
+        "profile": {
+          "type": [
+            "string",
+            "null",
+          ],
+        },
+        "publisherRegistered": {
+          "type": [
+            "boolean",
+            "null",
+          ],
+        },
+        "usdcBalance": {
+          "type": [
+            "string",
+            "null",
+          ],
+        },
+        "usdcStatus": {
+          "type": [
+            "string",
+            "null",
+          ],
+        },
+        "xlmAvailable": {
+          "type": [
+            "string",
+            "null",
+          ],
+        },
+        "xlmBalance": {
+          "type": [
+            "string",
+            "null",
+          ],
+        },
+        "xlmReserve": {
+          "type": [
+            "string",
+            "null",
+          ],
+        },
+      },
+      "required": [
+        "configured",
+        "profile",
+        "address",
+        "active",
+        "publisherRegistered",
+        "xlmBalance",
+        "xlmReserve",
+        "xlmAvailable",
+        "usdcBalance",
+        "usdcStatus",
+        "note",
+      ],
+      "type": [
+        "object",
+        "null",
+      ],
+    },
+    "requestedAt": {
+      "type": "string",
+    },
+    "source": {
+      "type": "string",
+    },
+    "statistics": {
+      "properties": {
+        "totalUsdc": {
+          "type": "string",
+        },
+        "totalXlm": {
+          "type": "string",
+        },
+      },
+      "required": [
+        "totalUsdc",
+        "totalXlm",
+      ],
+      "type": "object",
+    },
+  },
+  "required": [
+    "source",
+    "requestedAt",
+    "platform",
+    "agents",
+    "count",
+    "statistics",
+    "message",
+  ],
+  "type": "object",
+}
+`;
 
 exports[`tool schema snapshots > mindvault_wallet_info > annotations 1`] = `
 {
@@ -3181,41 +5160,58 @@ exports[`tool schema snapshots > the covered tool names are pinned 1`] = `
   "mindvault_accept_transfer",
   "mindvault_agent_status",
   "mindvault_backup_state",
+  "mindvault_batch_catalog_lookup",
   "mindvault_browse",
   "mindvault_buy",
   "mindvault_cancel_transfer",
   "mindvault_check_bindings",
   "mindvault_check_consistency",
   "mindvault_check_state_permissions",
+  "mindvault_debug_bundle",
   "mindvault_export_receipts",
+  "mindvault_fee_config",
+  "mindvault_freeze",
   "mindvault_import_wallet",
   "mindvault_list_profiles",
+  "mindvault_mainnet_banner",
   "mindvault_metrics",
   "mindvault_network_profile",
   "mindvault_preview",
+  "mindvault_preview_metadata_hash",
+  "mindvault_prewarm_catalog",
   "mindvault_publish",
+  "mindvault_publish_batch",
   "mindvault_publish_status",
+  "mindvault_publish_template",
   "mindvault_purchase_history",
   "mindvault_recover_catalog_cache",
   "mindvault_register",
   "mindvault_register_onchain",
+  "mindvault_registry_count",
   "mindvault_registry_health",
   "mindvault_registry_info",
   "mindvault_registry_list",
   "mindvault_registry_lookup",
   "mindvault_reset",
+  "mindvault_resource_change_log",
+  "mindvault_resource_provenance",
   "mindvault_restore_state",
   "mindvault_rotate_publisher_key",
+  "mindvault_royalty",
   "mindvault_search",
+  "mindvault_server_endpoints",
   "mindvault_set_listed",
   "mindvault_set_price",
   "mindvault_set_tags",
   "mindvault_setup_wallet",
+  "mindvault_switch_network_profile",
   "mindvault_transfer_ownership",
   "mindvault_tx_status",
   "mindvault_update_metadata",
   "mindvault_use_profile",
+  "mindvault_verify_attestation",
   "mindvault_verify_install",
+  "mindvault_wallet_balances",
   "mindvault_wallet_info",
 ]
 `;

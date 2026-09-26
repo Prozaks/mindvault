@@ -12,6 +12,13 @@ import { homedir } from "os";
 
 export const PURCHASE_HISTORY_VERSION = 1 as const;
 
+/**
+ * Identity of the state file the receipts belong to. `mindvault_reset` rewrites
+ * the state file, so a backup restored over it would otherwise merge a different
+ * wallet's receipts into this one (#846).
+ */
+export const PURCHASE_HISTORY_EPOCH = process.env.MINDVAULT_PURCHASES_EPOCH ?? "";
+
 /** One locally persisted purchase receipt. */
 export interface PurchaseReceipt {
   /** Resource that was purchased. */
@@ -58,6 +65,8 @@ export interface PurchaseHistoryFilter {
 
 export interface PurchaseHistoryFile {
   version: typeof PURCHASE_HISTORY_VERSION;
+  /** State-file epoch the receipts were recorded under; a mismatch is dropped (#846). */
+  epoch?: string;
   purchases: PurchaseReceipt[];
 }
 
@@ -83,7 +92,7 @@ export function purchasesFilePath(): string {
 }
 
 function emptyStore(): PurchaseHistoryFile {
-  return { version: PURCHASE_HISTORY_VERSION, purchases: [] };
+  return { version: PURCHASE_HISTORY_VERSION, epoch: PURCHASE_HISTORY_EPOCH, purchases: [] };
 }
 
 function isReceipt(value: unknown): value is PurchaseReceipt {
@@ -107,6 +116,11 @@ export function loadPurchaseHistory(): PurchaseHistoryFile {
   try {
     const raw = JSON.parse(readFileSync(file, "utf-8"));
     if (!raw || typeof raw !== "object" || !Array.isArray(raw.purchases)) {
+      return emptyStore();
+    }
+    // Receipts from a previous state file (pre-reset or a restored backup) are
+    // a different wallet's history; never merge them into the active one (#846).
+    if ((raw.epoch ?? "") !== PURCHASE_HISTORY_EPOCH) {
       return emptyStore();
     }
     const purchases = raw.purchases.filter(isReceipt);
