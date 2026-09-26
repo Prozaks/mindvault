@@ -207,7 +207,7 @@ pub const METHOD_SCHEMA: &[(&str, &str)] = &[
 pub const ERROR_SCHEMA: &[(u32, &str, &str)] = &[
     (1, "AlreadyRegistered", "A resource with the given `id` or the target verifier already exists."),
     (2, "NotFound", "No resource (or terms hash, receipt, or old verifier) matches the given key."),
-    (3, "InvalidPrice", "Price is `<= 0`."),
+    (3, "InvalidPrice", "Price is `<= 0`, exceeds `MAX_PRICE`, or is not strictly greater than the active `royalty_bps`."),
     (4, "MetadataTooLong", "Metadata pointer exceeds `MAX_METADATA_POINTER_LEN` (512 bytes)."),
     (5, "InvalidTag", "Tag validation failed (too many tags, empty tag, tag exceeds 32 bytes, or duplicate normalized tag)."),
     (6, "Unauthorized", "Caller authentication check failed or unauthorized."),
@@ -804,6 +804,8 @@ pub struct AnchorFailure {
 pub enum Error {
     AlreadyRegistered = 1,
     NotFound = 2,
+    /// A price is `<= 0`, exceeds `MAX_PRICE`, or is too small to support the
+    /// active `royalty_bps` (see `validate_price`).
     InvalidPrice = 3,
     MetadataTooLong = 4,
     InvalidTag = 5,
@@ -1019,7 +1021,7 @@ impl VaultRegistry {
     pub fn set_price(env: Env, id: String, new_price: i128) -> Result<(), Error> {
         Self::require_not_paused(&env)?;
         Self::validate_resource_id(&id)?;
-        Self::validate_price(new_price)?;
+        Self::validate_price(&env, new_price)?;
         let mut resource = Self::load(&env, &id)?;
         resource.creator.require_auth();
         Self::ensure_mutable(&resource)?;
@@ -1066,7 +1068,7 @@ impl VaultRegistry {
         for i in 0..updates.len() {
             let item = updates.get(i).unwrap();
             Self::validate_resource_id(&item.id)?;
-            Self::validate_price(item.new_price)?;
+            Self::validate_price(&env, item.new_price)?;
             let resource = Self::load(&env, &item.id)?;
             if resource.creator != creator {
                 return Err(Error::Unauthorized);
@@ -2226,11 +2228,7 @@ impl VaultRegistry {
     /// clock. The existing `set_paused(admin, true)` entry point remains the
     /// way to create an indefinite pause. A deadline at or before the current
     /// ledger timestamp takes effect as an immediate resume.
-    pub fn set_paused_until(
-        env: Env,
-        admin: Address,
-        pause_until: u64,
-    ) -> Result<(), Error> {
+    pub fn set_paused_until(env: Env, admin: Address, pause_until: u64) -> Result<(), Error> {
         Self::require_current_admin(&env, &admin)?;
         let active = pause_until > env.ledger().timestamp();
         env.storage().instance().set(&DataKey::Paused, &active);
@@ -2242,8 +2240,10 @@ impl VaultRegistry {
             env.storage().instance().remove(&DataKey::PauseUntil);
         }
         Self::bump_instance(&env);
-        env.events()
-            .publish((symbol_short!("pause"), admin.clone()), (active, admin.clone()));
+        env.events().publish(
+            (symbol_short!("pause"), admin.clone()),
+            (active, admin.clone()),
+        );
         env.events().publish(
             (Symbol::new(&env, "pause_until"), admin.clone()),
             (pause_until, admin),
@@ -3070,12 +3070,28 @@ impl VaultRegistry {
 }
 
 impl VaultRegistry {
-    fn validate_price(price: i128) -> Result<(), Error> {
+    fn validate_price(env: &Env, price: i128) -> Result<(), Error> {
         if price <= 0 {
             return Err(Error::InvalidPrice);
         }
         if price > MAX_PRICE {
             return Err(Error::PriceExceedsMax);
+        }
+        // Per-field bounds on `royalty_bps` say nothing about the split a given
+        // price actually produces, so a price that is individually legal can
+        // still mint a royalty of zero stroops (price below the basis-point
+        // quantum) or one that consumes the entire sale amount. Requiring the
+        // active `royalty_bps` to be strictly below the price in stroops keeps
+        // both degenerate cases out of the ledger. No fee config set means no
+        // royalty is owed, so the check is a no-op until one is configured.
+        let royalty_bps: i128 = env
+            .storage()
+            .instance()
+            .get::<DataKey, FeeConfig>(&DataKey::FeeConfig)
+            .map(|config| i128::from(config.royalty_bps))
+            .unwrap_or(0);
+        if royalty_bps >= price {
+            return Err(Error::InvalidPrice);
         }
         Ok(())
     }
@@ -3179,7 +3195,7 @@ impl VaultRegistry {
                 }
                 // All characters in the hex part must be valid hex digits.
                 for &b in hex_part {
-                    if !matches!(b, b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F') {
+                    if !b.is_ascii_hexdigit() {
                         return Err(Error::InvalidMetadataPointer);
                     }
                 }
@@ -3720,7 +3736,7 @@ impl VaultRegistry {
         memo_hash: Option<BytesN<32>>,
     ) -> Result<(), Error> {
         Self::require_not_paused(&env)?;
-        Self::validate_price(price)?;
+        Self::validate_price(&env, price)?;
         Self::validate_resource_id(&id)?;
         Self::validate_metadata_pointer(&metadata)?;
         let norm_tags = Self::normalize_and_validate_tags(&env, &tags)?;

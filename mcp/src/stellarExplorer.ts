@@ -42,7 +42,9 @@ export function explorerTxUrl(
 ): string | null {
   const hash = txHash?.trim();
   if (!hash) return null;
-  return `${explorerBase(network)}/tx/${hash}`;
+  // X-shard Soroban hashes arrive prefixed; the explorer only knows the raw hash (#847).
+  const rawHash = hash.replace(/^soroban:/i, "");
+  return `${explorerBase(network)}/tx/${rawHash}`;
 }
 
 /** Stellar Expert URL for an account / wallet address (G...). */

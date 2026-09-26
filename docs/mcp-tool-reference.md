@@ -17,6 +17,11 @@ For client installation and configuration see
 
 **39 tools** as of last generation.
 
+> **Read-only mode:** when `MINDVAULT_READ_ONLY` is set, mutating tools
+> (`mindvault_buy`, `mindvault_setup_wallet`, `mindvault_use_profile`, …) are not
+> advertised by ListTools and are refused on dispatch. Treat them as unavailable
+> in this listing rather than planning around a later "not available" error (#845).
+
 ---
 
 ## Wallet
@@ -36,11 +41,12 @@ For client installation and configuration see
 
 ## Catalog
 
-| Tool | Description | Structured |
-| --- | --- | --- |
-| `mindvault_browse` | List resources in the MindVault catalog with the same optional filters as mindvault_search and GET /resources: keyword, price range, verification status, resource type, owner, sort, pagination, tags, and listed state. Sort accepts newest, price_asc, price_desc, or title; results are ordered client-side too, so the order holds even when the backend ignores the parameter. | yes |
-| `mindvault_search` | Search the MindVault catalog by keyword and optional filters for price, resource type, verification status, owner, sort, pagination, tags, and listed state. Uses server-side filtering where supported and returns compact resource summaries. | yes |
-| `mindvault_preview` | Get details and price for a specific resource before purchasing. Returns title, description, price, type, verification status, and access URL. | yes |
+| Tool                              | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Structured |
+| `mindvault_browse`                | List resources in the MindVault catalog with the same optional filters as mindvault_search and GET /resources: keyword, price range, verification status, resource type, owner, sort, pagination, tags, and listed state. Sort accepts newest, price_asc, price_desc, or title; results are ordered client-side too, so the order holds even when the backend ignores the parameter.                                                                                                                                 | yes        |
+| `mindvault_search`                | Search the MindVault catalog by keyword and optional filters for price, resource type, verification status, owner, sort, pagination, tags, and listed state. Uses server-side filtering where supported and returns compact resource summaries.                                                                                                                                                                                                                                                                      | yes        |
+| `mindvault_preview`               | Get details and price for a specific resource before purchasing. Returns title, description, price, type, verification status, and access URL.                                                                                                                                                                                                                                                                                                                                                                       | yes        |
+| `mindvault_batch_catalog_lookup`  | Look up several catalog resources in one call. Accepts up to 25 resource ids and returns per-id results — title, price, verification status, type, and access URL — plus a missing list for ids the API does not know. A miss is a result, not an error, so one bad id cannot sink the batch. Serves the last cached snapshot (labelled) when the catalog API is unreachable, unless refetch is true. For on-chain registry data use mindvault_registry_lookup instead; for a single fresh id use mindvault_preview. | yes        |
+| `mindvault_preview_metadata_hash` | Preview the content digest anchored in a resource's on-chain metadata pointer without buying the resource. Returns the algorithm and canonical digest when present, or a deterministic reason when the pointer is absent, not digest-anchored (a bare URI/CID), or malformed — so an agent can compare expected hashes before purchasing. Pair with mindvault_check_consistency, which compares the same pointer against the API catalog. Accepts the fixed metadata hash format; see docs/mcp-metadata-hash.md.     | yes        |
 
 ## Publishing & Buying
 

@@ -5,10 +5,9 @@ use alloc::{format, string::ToString};
 use proptest::prelude::*;
 use soroban_sdk::{
     testutils::{
-        storage::Persistent as _, Address as _, EnvTestConfig, Events as _, Ledger as _, MockAuth,
-        MockAuthInvoke,
+        storage::Persistent as _, Address as _, Events as _, Ledger as _, MockAuth, MockAuthInvoke,
     },
-    Address, BytesN, Env, FromVal, IntoVal, String, Symbol, TryFromVal, TryIntoVal, Val, Vec,
+    Address, BytesN, Env, IntoVal, String, Symbol, TryFromVal, TryIntoVal, Val, Vec,
 };
 
 fn resource_storage_ttl(env: &Env, contract: &soroban_sdk::Address, id: &String) -> u32 {
@@ -203,7 +202,7 @@ fn register_batch_handles_partial_failures() {
         &creator,
         &dup_id,
         &100i128,
-        &String::from_str(&env, "m"),
+        &String::from_str(&env, "ipfs://m"),
         &empty_tags(&env),
     );
 
@@ -635,6 +634,140 @@ fn get_many_rejects_batches_over_twenty() {
     assert_eq!(client.try_get_many(&ids), Err(Ok(Error::BatchTooLarge)));
 }
 
+// ─── #810: semantic royalty/price check ─────────────────────────────────
+//
+// `validate_price` used to bound each field on its own, so a price that passed
+// `0 < price <= MAX_PRICE` could still be far too small to support the active
+// `royalty_bps`. These cover the cross-field rule on all three write paths that
+// accept a price: `register`, `set_price` and `set_price_many`.
+
+/// Installs an admin plus a fee config carrying `royalty_bps`.
+fn setup_with_royalty<'a>(royalty_bps: u32) -> (Env, Address, Address, VaultRegistryClient<'a>) {
+    let (env, creator, client) = setup();
+    let admin = Address::generate(&env);
+    client.nominate_new_admin(&admin);
+    client.set_fee_config(&FeeConfig {
+        platform_fee_bps: 0,
+        royalty_bps,
+        fee_recipient: Some(admin.clone()),
+    });
+    (env, creator, admin, client)
+}
+
+#[test]
+fn register_rejects_price_not_above_active_royalty() {
+    let (env, creator, _admin, client) = setup_with_royalty(5_000);
+    let metadata = String::from_str(&env, "ipfs://x");
+    let id = String::from_str(&env, "toosmall");
+
+    // `royalty_bps` is 5000, so any price at or below it is refused.
+    for price in [1i128, 2_499, 5_000] {
+        assert_eq!(
+            client.try_register(&creator, &id, &price, &metadata, &empty_tags(&env)),
+            Err(Ok(Error::InvalidPrice))
+        );
+    }
+    assert_eq!(client.count(), 0);
+}
+
+#[test]
+fn register_accepts_price_just_above_active_royalty() {
+    let (env, creator, _admin, client) = setup_with_royalty(5_000);
+    let id = String::from_str(&env, "okprice");
+    // One stroop above `royalty_bps` is the first acceptable price.
+    client.register(
+        &creator,
+        &id,
+        &5_001i128,
+        &String::from_str(&env, "ipfs://x"),
+        &empty_tags(&env),
+    );
+    assert_eq!(client.get(&id).price, 5_001);
+}
+
+#[test]
+fn set_price_rejects_price_not_above_active_royalty() {
+    let (env, creator, _admin, client) = setup_with_royalty(5_000);
+    let id = String::from_str(&env, "reprice");
+    client.register(
+        &creator,
+        &id,
+        &1_000_000i128,
+        &String::from_str(&env, "ipfs://x"),
+        &empty_tags(&env),
+    );
+    assert_eq!(
+        client.try_set_price(&id, &5_000i128),
+        Err(Ok(Error::InvalidPrice))
+    );
+    // The refused re-price leaves the stored price untouched.
+    assert_eq!(client.get(&id).price, 1_000_000);
+}
+
+#[test]
+fn set_price_many_rejects_batch_when_any_price_is_below_active_royalty() {
+    let (env, creator, _admin, client) = setup_with_royalty(5_000);
+    let id = String::from_str(&env, "batchprice");
+    client.register(
+        &creator,
+        &id,
+        &1_000_000i128,
+        &String::from_str(&env, "ipfs://x"),
+        &empty_tags(&env),
+    );
+    let updates = soroban_sdk::vec![
+        &env,
+        BatchPriceUpdate {
+            id: id.clone(),
+            new_price: 900_000,
+        },
+        BatchPriceUpdate {
+            id: id.clone(),
+            new_price: 10,
+        },
+    ];
+    assert_eq!(
+        client.try_set_price_many(&creator, &updates),
+        Err(Ok(Error::InvalidPrice))
+    );
+    // Every update is validated before any mutation, so the legal entry in the
+    // batch is rolled back along with the illegal one.
+    assert_eq!(client.get(&id).price, 1_000_000);
+}
+
+#[test]
+fn zero_royalty_config_leaves_low_prices_legal() {
+    // With no royalty owed the cross-field rule has nothing to enforce, so the
+    // pre-#810 floor of 1 stroop still stands.
+    let (env, creator, _admin, client) = setup_with_royalty(0);
+    let id = String::from_str(&env, "cheap");
+    client.register(
+        &creator,
+        &id,
+        &1i128,
+        &String::from_str(&env, "ipfs://x"),
+        &empty_tags(&env),
+    );
+    assert_eq!(client.get(&id).price, 1);
+}
+
+#[test]
+fn royalty_check_is_skipped_until_a_fee_config_exists() {
+    // `royalty_bps` is treated as 0 while no fee config is stored, which keeps
+    // the rule a no-op for registries that never enable fees.
+    let (env, creator, client) = setup();
+    let id = String::from_str(&env, "nofee");
+    client.register(
+        &creator,
+        &id,
+        &1i128,
+        &String::from_str(&env, "ipfs://x"),
+        &empty_tags(&env),
+    );
+    assert_eq!(client.get(&id).price, 1);
+    assert_eq!(client.get_fee_config(), None);
+}
+
 #[test]
 #[should_panic]
 fn non_owner_auth_cannot_set_price() {
@@ -841,8 +974,14 @@ fn set_price_many_validates_before_writing_any_resource() {
         client.try_set_price_many(&creator, &updates),
         Err(Ok(Error::InvalidPrice))
     );
-    assert_eq!(client.get(&String::from_str(&env, "atomica")).price, 100i128);
-    assert_eq!(client.get(&String::from_str(&env, "atomicb")).price, 100i128);
+    assert_eq!(
+        client.get(&String::from_str(&env, "atomica")).price,
+        100i128
+    );
+    assert_eq!(
+        client.get(&String::from_str(&env, "atomicb")).price,
+        100i128
+    );
 }
 
 #[test]
@@ -937,14 +1076,7 @@ fn register_with_hash_without_content_hash_keeps_metadata_mutable() {
     let (env, creator, client) = setup();
     let id = String::from_str(&env, "hashoptional");
     let initial = String::from_str(&env, "ipfs://QmInitial");
-    client.register_with_hash(
-        &creator,
-        &id,
-        &100i128,
-        &initial,
-        &empty_tags(&env),
-        &None,
-    );
+    client.register_with_hash(&creator, &id, &100i128, &initial, &empty_tags(&env), &None);
 
     let updated = String::from_str(&env, "ipfs://QmUpdated");
     client.update_metadata(&id, &updated);
@@ -2003,7 +2135,7 @@ fn set_tags_updates_value_without_touching_metadata() {
 fn set_royalty_recipient_overrides_for_resource() {
     let (env, creator, client) = setup();
     let id = String::from_str(&env, "royal1");
-    let metadata = String::from_str(&env, "m");
+    let metadata = String::from_str(&env, "ipfs://m");
     client.register(&creator, &id, &100i128, &metadata, &empty_tags(&env));
 
     // Initially None
@@ -2023,7 +2155,7 @@ fn set_royalty_recipient_overrides_for_resource() {
 fn set_royalty_recipient_can_clear_override() {
     let (env, creator, client) = setup();
     let id = String::from_str(&env, "royal2");
-    let metadata = String::from_str(&env, "m");
+    let metadata = String::from_str(&env, "ipfs://m");
     client.register(&creator, &id, &100i128, &metadata, &empty_tags(&env));
 
     // Set a recipient
@@ -2040,7 +2172,7 @@ fn set_royalty_recipient_can_clear_override() {
 fn set_royalty_recipient_requires_creator_auth() {
     let (env, creator, client) = setup();
     let id = String::from_str(&env, "royal3");
-    let metadata = String::from_str(&env, "m");
+    let metadata = String::from_str(&env, "ipfs://m");
     client.register(&creator, &id, &100i128, &metadata, &empty_tags(&env));
 
     // Without auth, should fail
@@ -2064,7 +2196,7 @@ fn set_royalty_recipient_fails_for_nonexistent_resource() {
 fn set_royalty_recipient_emits_event() {
     let (env, creator, client) = setup();
     let id = String::from_str(&env, "royal4");
-    let metadata = String::from_str(&env, "m");
+    let metadata = String::from_str(&env, "ipfs://m");
     client.register(&creator, &id, &100i128, &metadata, &empty_tags(&env));
 
     // Set recipient
@@ -2093,7 +2225,7 @@ fn set_royalty_recipient_emits_event() {
 fn set_royalty_recipient_fails_when_paused() {
     let (env, creator, admin, client) = setup_with_admin();
     let id = String::from_str(&env, "royal5");
-    let metadata = String::from_str(&env, "m");
+    let metadata = String::from_str(&env, "ipfs://m");
     client.register(&creator, &id, &100i128, &metadata, &empty_tags(&env));
 
     // Pause contract
@@ -2109,7 +2241,7 @@ fn set_royalty_recipient_fails_when_paused() {
 fn set_royalty_recipient_fails_for_frozen_resource() {
     let (env, creator, client) = setup();
     let id = String::from_str(&env, "royal6");
-    let metadata = String::from_str(&env, "m");
+    let metadata = String::from_str(&env, "ipfs://m");
     client.register(&creator, &id, &100i128, &metadata, &empty_tags(&env));
 
     // Freeze resource
@@ -4320,6 +4452,12 @@ fn full_workflow_emits_exactly_the_documented_events() {
     client.set_terms_hash(&alice, &String::from_str(&env, "termshash"));
     record(&env, &client, &mut observed);
 
+    // Per-resource royalty recipient override (#618) and the scheduled-pause
+    // deadline round out the documented event schema (`setroyal`,
+    // `pause_until`).
+    client.set_royalty_recipient(&r1, &Some(bob.clone())); // -> "setroyal"
+    record(&env, &client, &mut observed);
+
     let admin1 = Address::generate(&env);
     client.nominate_new_admin(&admin1); // bootstrap -> "setadmin"
     record(&env, &client, &mut observed);
@@ -4409,13 +4547,14 @@ fn full_workflow_emits_exactly_the_documented_events() {
 
     client.set_paused(&admin2, &true); // -> "pause"
     record(&env, &client, &mut observed);
+    client.set_paused_until(&admin2, &200); // -> "pause", "pause_until"
+    record(&env, &client, &mut observed);
     client.set_paused(&admin2, &false);
     record(&env, &client, &mut observed);
 
     // Network bootstrap and the creator reactivation path round out the
-    // documented event schema (`netinit`, `reactive`).
-    client.initialize_network(&env.ledger().network_id());
-    record(&env, &client, &mut observed);
+    // documented event schema (`netinit` was already observed above, so this
+    // only covers `reactive`; `initialize_network` is write-once).
     client.freeze_resource(&r0);
     record(&env, &client, &mut observed);
     client.reactivate_resource(&r0);
@@ -4537,7 +4676,7 @@ fn fee_config_rejects_combined_rates_above_maximum() {
 
 #[test]
 fn set_fee_recipient_updates_only_recipient() {
-    let (env, _creator, admin, client) = setup_with_admin();
+    let (env, _creator, _admin, client) = setup_with_admin();
 
     // Set initial fee config with rates and recipient
     let initial_recipient = Address::generate(&env);
@@ -4628,7 +4767,7 @@ fn set_fee_recipient_requires_admin_auth() {
 
 #[test]
 fn set_fee_recipient_emits_setfee_event() {
-    let (env, _creator, admin, client) = setup_with_admin();
+    let (env, _creator, _admin, client) = setup_with_admin();
 
     // Set initial config
     let initial_recipient = Address::generate(&env);
@@ -4754,7 +4893,7 @@ fn set_fee_destination_emits_audit_event() {
 
 #[test]
 fn set_fee_destination_validates_bounds_and_combined_policy() {
-    let (env, _creator, admin, client) = setup_with_admin();
+    let (env, _creator, _admin, client) = setup_with_admin();
     client.set_fee_config(&FeeConfig {
         platform_fee_bps: 0,
         royalty_bps: 0,
@@ -4845,7 +4984,7 @@ fn set_fee_destination_requires_admin_auth() {
 
 #[test]
 fn set_fee_destination_fails_when_paused() {
-    let (env, _creator, admin, client) = setup_with_admin();
+    let (_env, _creator, admin, client) = setup_with_admin();
     client.set_fee_config(&FeeConfig {
         platform_fee_bps: 1_000,
         royalty_bps: 0,
@@ -4903,7 +5042,7 @@ fn fee_destination_is_preserved_and_partial_routes_require_recipient() {
 
 #[test]
 fn set_fee_recipient_fails_when_paused() {
-    let (env, _creator, admin, client) = setup_with_admin();
+    let (_env, _creator, admin, client) = setup_with_admin();
 
     // Set initial fee config
     client.set_fee_config(&FeeConfig {
@@ -5028,7 +5167,7 @@ fn remove_verifier_idempotent() {
 
 #[test]
 fn remove_verifier_requires_admin_auth() {
-    let (env, _creator, admin, client) = setup_with_admin();
+    let (env, _creator, _admin, client) = setup_with_admin();
     let verifier = Address::generate(&env);
 
     // Admin adds a verifier
@@ -5049,7 +5188,7 @@ fn remove_verifier_requires_admin_auth() {
 #[test]
 fn remove_verifier_revokes_verification_ability() {
     let (env, creator, _admin, client) = setup_with_admin();
-    let id = register_default(&env, &creator, &client, "revoke-test");
+    let id = register_default(&env, &creator, &client, "revoketest");
     let verifier = Address::generate(&env);
 
     // Add verifier and verify they can set verification status
@@ -5063,7 +5202,7 @@ fn remove_verifier_revokes_verification_ability() {
     assert!(!client.is_verifier(&verifier));
 
     // Register another resource
-    let id2 = register_default(&env, &creator, &client, "revoke-test-2");
+    let id2 = register_default(&env, &creator, &client, "revoketest2");
 
     // Removed verifier cannot set verification status
     let res =
@@ -5497,7 +5636,6 @@ fn set_verification_status_emits_old_and_new_status() {
     client.set_verification_status(&id, &verifier, &VerificationStatus::Verified, &None);
 
     let all = env.events().all();
-    let (_contract, _topics, data) = all.get_unchecked(all.len() - 1);
     let (_contract, topics, data) = all.get_unchecked(all.len() - 1);
     assert_eq!(topics.len(), 2);
     let topic: Symbol = Symbol::try_from_val(&env, &topics.get(0).unwrap()).unwrap();
@@ -5661,7 +5799,7 @@ fn readme_methods_table_matches_method_schema() {
         .lines()
         .filter_map(|line| {
             let rest = line.trim().strip_prefix("| `")?;
-            let end = rest.find(|c| c == '(' || c == '`')?;
+            let end = rest.find(['(', '`'])?;
             Some(&rest[..end])
         })
         .collect();
@@ -8548,7 +8686,7 @@ fn set_verification_status_event_topic_holds_full_max_length_id() {
 
 #[test]
 fn listed_count_starts_at_zero() {
-    let (env, _creator, client) = setup();
+    let (_env, _creator, client) = setup();
     assert_eq!(client.listed_count(), 0u32);
 }
 
@@ -8981,7 +9119,7 @@ fn storage_key_variant(env: &Env, key: &DataKey) -> Symbol {
 /// Every `DataKey` variant, with the name and arity it must keep across
 /// upgrades. Adding a variant means adding a row here — the exhaustive match in
 /// `storage_key_migration_covers_every_variant` will not compile until you do.
-fn storage_key_wire_contract(env: &Env) -> [(DataKey, &'static str, u32); 26] {
+fn storage_key_wire_contract(env: &Env) -> [(DataKey, &'static str, u32); 28] {
     let id = String::from_str(env, "migkey");
     let who = Address::generate(env);
     [
@@ -9070,7 +9208,7 @@ fn storage_key_migration_covers_every_variant() {
     let contract = storage_key_wire_contract(&env);
     assert_eq!(
         contract.len(),
-        26,
+        28,
         "storage_key_wire_contract must list every DataKey variant"
     );
 
@@ -9102,6 +9240,8 @@ fn storage_key_migration_covers_every_variant() {
             DataKey::PaymentTxHash(_) => "PaymentTxHash",
             DataKey::AttestationHash(_) => "AttestationHash",
             DataKey::PendingAdminExpiry => "PendingAdminExpiry",
+            DataKey::CreatorListedCount(_) => "CreatorListedCount",
+            DataKey::MemoHash(_) => "MemoHash",
             DataKey::FeeDestination => "FeeDestination",
         };
         assert_eq!(
@@ -9344,12 +9484,20 @@ fn group_digits(value: u32) -> std::string::String {
     let digits = value.to_string();
     let mut out = std::string::String::new();
     for (i, ch) in digits.chars().enumerate() {
-        if i > 0 && (digits.len() - i) % 3 == 0 {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
             out.push('_');
         }
         out.push(ch);
     }
     out
+}
+
+/// Whether `extend_ttl`'s no-op window is strictly positive. Kept as a function
+/// rather than inlined into the assertion below so the comparison is evaluated
+/// at runtime: written inline the compiler folds it to a constant, and a
+/// constant assertion cannot catch the constants actually drifting apart.
+fn has_positive_extend_window(lifetime_threshold: u32, bump_amount: u32) -> bool {
+    lifetime_threshold < bump_amount
 }
 
 #[test]
@@ -9362,7 +9510,7 @@ fn ttl_threshold_leaves_exactly_one_day_of_slack() {
         "BUMP_AMOUNT and LIFETIME_THRESHOLD must differ by exactly one day"
     );
     assert!(
-        TTL_LIFETIME_THRESHOLD < TTL_BUMP_AMOUNT,
+        has_positive_extend_window(TTL_LIFETIME_THRESHOLD, TTL_BUMP_AMOUNT),
         "LIFETIME_THRESHOLD must stay below BUMP_AMOUNT, or every read would pay rent"
     );
 }
@@ -9645,7 +9793,7 @@ impl LifecycleOp {
             0 | 1 => LifecycleOp::Relist,
             2 | 3 => LifecycleOp::Delist,
             4 | 5 => LifecycleOp::Freeze,
-            6 | 7 | 8 => LifecycleOp::OpenDispute,
+            6..=8 => LifecycleOp::OpenDispute,
             9 | 10 => LifecycleOp::Resolve(ResourceState::Listed),
             11 | 12 => LifecycleOp::Resolve(ResourceState::Delisted),
             13 | 14 => LifecycleOp::Resolve(ResourceState::Frozen),

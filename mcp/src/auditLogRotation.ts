@@ -180,6 +180,9 @@ export class RotatingJsonlWriter {
    */
   private rotate(): void {
     const { path, maxFiles } = this.config;
+    // Rotation is serialized with append: re-stat first so any tail written by a
+    // concurrent append is carried into the rotated generation, never truncated (#844).
+    this.size = existsSync(path) ? statSync(path).size : 0;
 
     if (maxFiles <= 0) {
       rmSync(path, { force: true });

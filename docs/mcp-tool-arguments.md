@@ -128,14 +128,14 @@ server calls.
 Handlers receive normalized values, so a tool behaves identically whichever
 accepted spelling the agent used:
 
-| Argument kind          | Normalization                                               |
-| ---------------------- | ----------------------------------------------------------- |
-| string                 | trimmed                                                     |
-| enum                   | trimmed, compared exactly                                   |
-| flag                   | coerced to a real boolean                                   |
-| `txHash`               | lowercased bare hex                                         |
-| `expectedMetadataHash` | canonical `sha256:<hex>` form                               |
-| `tags` (tag_array)     | each tag is trimmed, lowercased, and duplicates are removed |
+| Argument kind          | Normalization                 |
+| ---------------------- | ----------------------------- |
+| string                 | trimmed                       |
+| enum                   | trimmed, compared exactly     |
+| flag                   | coerced to a real boolean     |
+| `txHash`               | lowercased bare hex           |
+| `expectedMetadataHash` | canonical `sha256:<hex>` form |
+| string_array           | per-entry trimmed, empties dropped; case and duplicates kept (unlike `tag_array`, entries are data selectors, not on-chain tags) |
 
 ---
 
