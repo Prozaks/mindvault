@@ -75,6 +75,7 @@ export interface ReceiptExportFilters {
   since: string | null;
   until: string | null;
   limit: number | null;
+  groupBy: ReceiptExportGrouping | null;
 }
 
 export interface ReceiptExport {
@@ -88,6 +89,8 @@ export interface ReceiptExport {
   totalAmount: string;
   currency: typeof RECEIPT_CURRENCY;
   receipts: ExportedReceipt[];
+  /** Per-month totals, newest month first, when groupBy is "month". */
+  monthlySummaries?: MonthlyReceiptSummary[];
   /** RFC 4180 document of the same rows — present only when format is "csv". */
   csv?: string;
   /** Newline-Delimited JSON document of the same rows — present only when format is "ndjson". */
@@ -112,6 +115,7 @@ export interface ReceiptExportOptions {
   /** Inclusive upper bound on `purchasedAt`. */
   until?: string;
   limit?: number;
+  groupBy?: ReceiptExportGrouping;
 }
 
 function optionalTrimmed(args: Record<string, unknown>, field: string): string | undefined {
@@ -176,6 +180,13 @@ export function normalizeReceiptExportOptions(
 
   const resourceId = optionalTrimmed(raw, "resourceId");
   const network = optionalTrimmed(raw, "network");
+  let groupBy: ReceiptExportGrouping | undefined;
+  if (raw.groupBy !== undefined && raw.groupBy !== null && raw.groupBy !== "") {
+    if (raw.groupBy !== "month") {
+      throw new ReceiptExportError('Invalid groupBy: must be "month".');
+    }
+    groupBy = raw.groupBy;
+  }
 
   return {
     format,
@@ -184,6 +195,7 @@ export function normalizeReceiptExportOptions(
     ...(since ? { since } : {}),
     ...(until ? { until } : {}),
     ...(limit !== undefined ? { limit } : {}),
+    ...(groupBy ? { groupBy } : {}),
   };
 }
 
@@ -286,11 +298,13 @@ export function buildReceiptExport(
       since: options.since ?? null,
       until: options.until ?? null,
       limit: options.limit ?? null,
+      groupBy: options.groupBy ?? null,
     },
     count: rows.length,
     totalAmount: sumAmounts(rows),
     currency: RECEIPT_CURRENCY,
     receipts: rows,
+    ...(options.groupBy === "month" ? { monthlySummaries: groupReceiptsByMonth(rows) } : {}),
     ...(options.format === "csv" ? { csv: receiptsToCsv(rows) } : {}),
     ...(options.format === "ndjson" ? { ndjson: receiptsToNdjson(rows) } : {}),
   };
@@ -348,8 +362,9 @@ export const RECEIPT_EXPORT_OUTPUT_SCHEMA = {
         since: { type: ["string", "null"] },
         until: { type: ["string", "null"] },
         limit: { type: ["integer", "null"] },
+        groupBy: { type: ["string", "null"], enum: ["month", null] },
       },
-      required: ["resourceId", "network", "since", "until", "limit"],
+      required: ["resourceId", "network", "since", "until", "limit", "groupBy"],
     },
     count: { type: "integer", description: "Number of exported receipts." },
     totalAmount: {
@@ -383,6 +398,20 @@ export const RECEIPT_EXPORT_OUTPUT_SCHEMA = {
           "receiptRef",
           "explorerUrl",
         ],
+      },
+    },
+    monthlySummaries: {
+      type: "array",
+      description: 'UTC monthly totals, present only when groupBy is "month".',
+      items: {
+        type: "object",
+        properties: {
+          month: { type: "string", pattern: "^[0-9]{4}-[0-9]{2}$" },
+          count: { type: "integer" },
+          totalAmount: { type: "string" },
+          currency: { type: "string", const: RECEIPT_CURRENCY },
+        },
+        required: ["month", "count", "totalAmount", "currency"],
       },
     },
     csv: {

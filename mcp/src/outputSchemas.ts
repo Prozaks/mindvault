@@ -624,6 +624,8 @@ export const PUBLISH_BATCH_OUTPUT_SCHEMA = {
 
 /** Tools that must stay text-only (no schema, no structuredContent). */
 export const TEXT_ONLY_TOOLS = [
+  "mindvault_repair_sponsored_account",
+  "mindvault_terms",
   "mindvault_check_bindings",
   "mindvault_reset",
   "mindvault_backup_state",

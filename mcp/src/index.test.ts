@@ -1584,6 +1584,60 @@ describe("setupWallet – sponsored account failure diagnostics", () => {
   });
 });
 
+describe("repairSponsoredAccount", () => {
+  const secretKey = "SAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+  const publicKey = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+
+  beforeEach(() => {
+    _resetProfiles();
+    vi.doMock("@stellar/stellar-sdk", () => ({
+      Keypair: {
+        fromSecret: vi.fn().mockReturnValue({ publicKey: () => publicKey }),
+      },
+    }));
+  });
+
+  afterEach(() => {
+    _resetProfiles();
+    vi.restoreAllMocks();
+  });
+
+  it("re-fetches Horizon state before restoring a half-created wallet", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      mockResponse({
+        subentry_count: 1,
+        balances: [
+          { asset_type: "native", balance: "2.0000000" },
+          { asset_type: "credit_alphanum4", asset_code: "USDC", balance: "0.0000000" },
+        ],
+      }),
+    );
+
+    const result = JSON.parse(
+      await dispatchTool("mindvault_repair_sponsored_account", {
+        secretKey,
+        profile: "recovered",
+      }),
+    );
+    expect(result).toMatchObject({
+      status: "repaired",
+      profile: "recovered",
+      address: publicKey,
+      accountStatus: "zero",
+      persisted: true,
+    });
+    expect(JSON.stringify(result)).not.toContain(secretKey);
+  });
+
+  it("does not restore a key when Horizon says the account is missing", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(mockResponse({}, false, 404));
+
+    await expect(dispatchTool("mindvault_repair_sponsored_account", { secretKey })).rejects.toThrow(
+      /does not exist.*no local key was changed/i,
+    );
+  });
+});
+
 describe("multi-wallet profiles", () => {
   beforeEach(() => {
     _resetProfiles();

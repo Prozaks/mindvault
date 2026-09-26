@@ -39,6 +39,7 @@
 /** Tools that mutate state or spend funds — gated on mainnet. */
 export const MAINNET_GATED_TOOLS = [
   "mindvault_setup_wallet",
+  "mindvault_repair_sponsored_account",
   "mindvault_register",
   "mindvault_publish",
   "mindvault_publish_batch",

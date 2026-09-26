@@ -1315,6 +1315,40 @@ async function setupWallet(profileArg?: string): Promise<ToolOutcome> {
   };
 }
 
+async function repairSponsoredAccount(secretKey: string, profileArg?: string): Promise<string> {
+  const target = resolveProfileName(profileArg);
+  const { Keypair } = await import("@stellar/stellar-sdk");
+  const publicKey = Keypair.fromSecret(secretKey).publicKey();
+  const details = await getBalanceDetails(publicKey);
+
+  if (details.status === "missing") {
+    throw new Error(
+      `Sponsored-account repair stopped: ${publicKey} does not exist on the configured Stellar network. Retry mindvault_setup_wallet; no local key was changed.`,
+    );
+  }
+
+  activeProfileName = target;
+  activeProfile().wallet = { publicKey, secretKey };
+  saveState();
+  return JSON.stringify(
+    {
+      status: "repaired",
+      profile: target,
+      address: publicKey,
+      accountStatus: details.status,
+      xlmBalance: details.xlmBalance,
+      usdcBalance: details.usdcBalance,
+      persisted: true,
+      message:
+        details.status === "no-trustline"
+          ? "Wallet key restored, but the sponsored account still needs a USDC trustline."
+          : "Wallet key restored after confirming the sponsored account on Horizon.",
+    },
+    null,
+    2,
+  );
+}
+
 async function walletInfoOutcome(): Promise<ToolOutcome> {
   const wallet = requireWallet();
   const details = await getBalanceDetails(wallet.publicKey);
@@ -3588,6 +3622,7 @@ function isDispatchableTool(name: string): boolean {
 
 const STATE_MUTATING_TOOLS = new Set([
   "mindvault_setup_wallet",
+  "mindvault_repair_sponsored_account",
   "mindvault_use_profile",
   "mindvault_switch_network_profile",
   "mindvault_register",
@@ -3601,6 +3636,7 @@ const STATE_MUTATING_TOOLS = new Set([
   "mindvault_accept_transfer",
   "mindvault_cancel_transfer",
   "mindvault_set_listed",
+  "mindvault_terms",
   "mindvault_set_tags",
   "mindvault_freeze",
   "mindvault_royalty",
@@ -3640,7 +3676,9 @@ async function dispatchToolOutcome(
     name in TOOL_ARGUMENT_SPECS && !isDryRunCall ? validateToolArgs(name, rawArgs) : {};
   const dryRunArgs = isDryRunCall ? (rawRecord as ValidatedArgs) : args;
 
-  assertMainnetMutationAllowed(NETWORK, name, rawRecord);
+  if (!(name === "mindvault_terms" && rawRecord.operation === "get")) {
+    assertMainnetMutationAllowed(NETWORK, name, rawRecord);
+  }
 
   // Network-independent spend confirmation (#594). Distinct from the mainnet
   // guardrail above (which only fires on pubnet) and from the auto-pay ceiling
@@ -3661,6 +3699,11 @@ async function dispatchToolOutcome(
     switch (name) {
       case "mindvault_setup_wallet":
         return setupWallet(optionalString(args, "profile"));
+      case "mindvault_repair_sponsored_account":
+        return repairSponsoredAccount(
+          requiredString(args, "secretKey"),
+          optionalString(args, "profile"),
+        );
       case "mindvault_wallet_info":
         return walletInfoOutcome();
       case "mindvault_use_profile":
@@ -3749,6 +3792,13 @@ async function dispatchToolOutcome(
         return agentStatus();
       case "mindvault_registry_info":
         return registryInfo();
+      case "mindvault_terms":
+        return publisherTerms(
+          requiredString(args, "operation"),
+          optionalString(args, "creator"),
+          optionalString(args, "termsHash"),
+          flag(args, "confirmMainnet"),
+        );
       case "mindvault_network_profile":
         return networkProfile();
       case "mindvault_check_bindings":

@@ -43,6 +43,9 @@ function specValidatedTools() {
 /** Minimum arguments that must pass for each tool. */
 const VALID_CALLS: Record<string, Record<string, unknown>> = {
   mindvault_setup_wallet: {},
+  mindvault_repair_sponsored_account: {
+    secretKey: "SAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+  },
   mindvault_wallet_info: {},
   mindvault_use_profile: { name: "publisher" },
   mindvault_switch_network_profile: { name: "mainnet", network: "mainnet" },
@@ -61,6 +64,10 @@ const VALID_CALLS: Record<string, Record<string, unknown>> = {
   mindvault_register_onchain: { resourceId: "res-001" },
   mindvault_agent_status: {},
   mindvault_registry_info: {},
+  mindvault_terms: {
+    operation: "get",
+    creator: "GA6HCMBLTZS5VYYBCATRBRZ3BZJMAFUDKYYF6AH6MVCMGWMRDNSWJPIH",
+  },
   mindvault_network_profile: {},
   mindvault_check_bindings: {},
   mindvault_check_consistency: { resourceId: "res-001" },
