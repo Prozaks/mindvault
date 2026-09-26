@@ -41,6 +41,8 @@ baseline for comparing one revision of the contract against another.
 | Resource (typical)         | persistent |  48 |   528 |   576 |    640 |
 | Index(u32) -> id           | persistent |  36 |    32 |    68 |     96 |
 | Count                      | instance   |  28 |     8 |    36 |     48 |
+| TagCount (max-size tag)    | instance   |  68 |     8 |    76 |    160 |
+| TopTags                    | instance   |  28 |  1772 |  1800 |   2000 |
 | CreatorResources           | persistent |  76 |    64 |   140 |    160 |
 | CreatorCount               | instance   |  72 |     8 |    80 |     96 |
 | TagIndex (max-size tag)    | persistent |  68 |    44 |   112 |    160 |
@@ -59,14 +61,15 @@ baseline for comparing one revision of the contract against another.
 
 Aggregates, which are the numbers that scale with usage:
 
-| Operation                                                         | Bytes | Budget |
-| ----------------------------------------------------------------- | ----: | -----: |
-| One max-size registration (`Resource` + `Index` + one `TagIndex`) |  1728 |   1900 |
-| One payment (`PaymentReceipt` + `PaymentIndex`)                   |   756 |    850 |
+| Operation                                                                          | Bytes | Budget |
+| ---------------------------------------------------------------------------------- | ----: | -----: |
+| One max-size registration (`Resource` + `Index` + one `TagIndex` + one `TagCount`) |  1868 |   1900 |
+| One payment (`PaymentReceipt` + `PaymentIndex`)                                    |   756 |    850 |
 
-A registration with all 8 tags writes 8 `TagIndex` entries, one per tag, plus
-the `CreatorResources` and `CreatorCount` updates — the aggregate above counts
-a single tag so the per-tag cost stays visible.
+A registration with all 8 tags writes 8 `TagIndex` and 8 `TagCount` entries, one
+per tag, plus the `CreatorResources` and `CreatorCount` updates — the aggregate
+above counts one of each so the per-tag cost stays visible. `TopTags` is a
+shared bounded view and is not included in the per-registration aggregate.
 
 ## Notes on individual entries
 
