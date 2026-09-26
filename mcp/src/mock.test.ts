@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   mockBuyReceipt,
   mockEnabledFromEnv,
+  mockSetTags,
   MOCK_CATALOG_RESOURCES,
   MOCK_REGISTRY_RESOURCES,
   mockSetTags,
@@ -59,15 +60,11 @@ describe("mockBuyReceipt", () => {
 });
 
 describe("mockSetTags", () => {
-  it("returns a deterministic successful replacement payload", () => {
-    const result = JSON.parse(mockSetTags("res-1", ["dataset", "api"]));
-    expect(result).toMatchObject({
-      status: "success",
-      resourceId: "res-1",
-      tags: ["dataset", "api"],
-      source: "on-chain (mock)",
-    });
-    expect(result.txHash).toBe("MOCK_TX_SET_TAGS_res-1");
+  it("returns a deterministic text-only result", () => {
+    const result = mockSetTags("mock-1", ["dataset", "research"]);
+    expect(result).toContain('Tags updated for resource "mock-1".');
+    expect(result).toContain("Tags: dataset, research");
+    expect(result).toContain("MOCK_TX_SET_TAGS_mock-1");
   });
 });
 

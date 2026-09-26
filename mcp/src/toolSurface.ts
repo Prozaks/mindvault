@@ -32,6 +32,14 @@
 import { filterToolsForReadOnlyMode } from "./readOnlyMode.js";
 import { TOOL_DEFINITIONS, type ToolDefinition } from "./tools.js";
 
+/**
+ * Tools that are defined and validated but have no dispatch handler.
+ *
+ * This is a ledger of known gaps, not a place to park new tools.
+ * `listToolsContract.test.ts` asserts it names exactly the tools that are
+ * missing a handler, so every new definition must be either implemented or
+ * explicitly withheld.
+ */
 export const TOOLS_WITHOUT_HANDLERS: readonly string[] = [];
 
 const WITHOUT_HANDLERS: ReadonlySet<string> = new Set(TOOLS_WITHOUT_HANDLERS);
