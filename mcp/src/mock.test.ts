@@ -5,6 +5,7 @@ import {
   mockSetTags,
   MOCK_CATALOG_RESOURCES,
   MOCK_REGISTRY_RESOURCES,
+  mockSetTags,
 } from "./mock.js";
 
 describe("mockEnabledFromEnv", () => {

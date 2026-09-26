@@ -48,8 +48,8 @@ Error: Unknown tool: mindvault_by. Available tools: mindvault_agent_status, mind
 
 Each issue carries a stable code (`unknown_argument`, `missing_required`,
 `wrong_type`, `empty_string`, `too_short`, `too_long`, `pattern_mismatch`,
-`not_in_enum`, `invalid_hash`, `not_an_object`) for clients that want to branch
-on the failure rather than parse prose.
+`not_in_enum`, `invalid_hash`, `invalid_tag_array`, `not_an_object`) for clients
+that want to branch on the failure rather than parse prose.
 
 ---
 

@@ -4010,6 +4010,10 @@ exports[`tool schema snapshots > mindvault_set_tags > input schema 1`] = `
       "description": "Required on mainnet (or set MINDVAULT_ALLOW_MAINNET=1). Explicitly confirm this mutation on the public Stellar network.",
       "type": "boolean",
     },
+    "confirmPaid": {
+      "description": "Required when the server runs with MINDVAULT_CONFIRM_PAID_OPERATIONS=usdc or =all. Explicitly confirm that this call may spend from the agent wallet. Ignored when the policy is off (the default) and on dry runs.",
+      "type": "boolean",
+    },
     "resourceId": {
       "description": "The on-chain resource ID to update tags for (from mindvault_publish or mindvault_browse).",
       "examples": [
