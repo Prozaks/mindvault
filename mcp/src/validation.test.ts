@@ -10,6 +10,7 @@
 import { describe, it, expect } from "vitest";
 import { TOOL_DEFINITIONS } from "./tools.js";
 import {
+  BATCH_LOOKUP_MAX_IDS,
   TOOL_ARGUMENT_SPECS,
   TOOLS_WITHOUT_ARG_VALIDATION,
   ToolValidationError,
@@ -18,10 +19,14 @@ import {
   knownToolNames,
   optionalString,
   requiredString,
+  requiredStringArray,
   validateToolArgs,
 } from "./validation.js";
 
 const VALID_SHA256 = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08";
+
+/** One id longer than BATCH_LOOKUP_MAX_IDS allows, for the batch tool's ceiling test. */
+const OVERSIZE_BATCH = Array.from({ length: 26 }, (_, i) => `res-${String(i).padStart(3, "0")}`);
 
 /**
  * Advertised tools that go through this layer.
@@ -81,6 +86,7 @@ const VALID_CALLS: Record<string, Record<string, unknown>> = {
     newCreator: "GA6HCMBLTZS5VYYBCATRBRZ3BZJMAFUDKYYF6AH6MVCMGWMRDNSWJPIH",
   },
   mindvault_set_listed: { resourceId: "res-001", listed: true },
+  mindvault_dispute: { resourceId: "res-001", action: "flag", reason: "Duplicate listing" },
   mindvault_set_tags: { resourceId: "res-001", tags: ["dataset"] },
   mindvault_freeze: { resourceId: "res-001", confirm: "freeze_metadata" },
   mindvault_fee_config: {},
@@ -98,6 +104,8 @@ const VALID_CALLS: Record<string, Record<string, unknown>> = {
   mindvault_verify_install: {},
   mindvault_debug_bundle: { auditLogLines: 50, includeEnvironment: true },
   mindvault_recover_catalog_cache: {},
+  mindvault_wallet_balances: {},
+  mindvault_server_endpoints: {},
 };
 
 function expectInvalid(tool: string, args: unknown): ToolValidationError {
@@ -408,6 +416,65 @@ describe("hash arguments", () => {
   });
 });
 
+describe("string_array arguments", () => {
+  it("accepts an array and keeps case and duplicates (#608)", () => {
+    const args = validateToolArgs("mindvault_batch_catalog_lookup", {
+      resourceIds: ["Res-001", "res-001"],
+    });
+    expect(requiredStringArray(args, "resourceIds")).toEqual(["Res-001", "res-001"]);
+  });
+
+  it("trims entries and drops empties", () => {
+    const args = validateToolArgs("mindvault_batch_catalog_lookup", {
+      resourceIds: [" res-001 ", "", "   ", "res-002"],
+    });
+    expect(requiredStringArray(args, "resourceIds")).toEqual(["res-001", "res-002"]);
+  });
+
+  it("accepts a comma-separated string", () => {
+    const args = validateToolArgs("mindvault_batch_catalog_lookup", {
+      resourceIds: "res-001, res-002,res-003",
+    });
+    expect(requiredStringArray(args, "resourceIds")).toEqual(["res-001", "res-002", "res-003"]);
+  });
+
+  it("rejects a non-string entry with a deterministic message", () => {
+    const err = expectInvalid("mindvault_batch_catalog_lookup", {
+      resourceIds: ["res-001", 42],
+    });
+    expect(err.issues[0].code).toBe("invalid_string_array");
+    expect(err.message).toContain("array of strings");
+    // Rejected values are never echoed back.
+    expect(err.message).not.toContain("42");
+  });
+
+  it("reports the position of a malformed entry", () => {
+    const err = expectInvalid("mindvault_batch_catalog_lookup", {
+      resourceIds: ["res-001", "not ok!"],
+    });
+    expect(err.issues[0].code).toBe("invalid_string_array");
+    expect(err.issues[0].message).toContain("resourceIds[2]");
+  });
+
+  it("rejects an empty selection after normalization", () => {
+    const err = expectInvalid("mindvault_batch_catalog_lookup", { resourceIds: [] });
+    expect(err.issues[0].code).toBe("invalid_string_array");
+    expect(err.message).toContain("at least 1");
+  });
+
+  it("rejects a batch above the advertised ceiling", () => {
+    const err = expectInvalid("mindvault_batch_catalog_lookup", { resourceIds: OVERSIZE_BATCH });
+    expect(err.issues[0].code).toBe("invalid_string_array");
+    expect(err.message).toContain(`at most ${BATCH_LOOKUP_MAX_IDS}`);
+  });
+
+  it("rejects a non-array bag for the batch field", () => {
+    const err = expectInvalid("mindvault_batch_catalog_lookup", { resourceIds: 7 });
+    expect(err.issues[0].code).toBe("invalid_string_array");
+    expect(err.message).toContain("array of strings or a comma-separated string");
+  });
+});
+
 describe("multi-issue reporting", () => {
   it("reports every problem in one deterministic error", () => {
     const err = expectInvalid("mindvault_publish", {
@@ -440,6 +507,44 @@ describe("normalized output", () => {
 });
 
 // ── Catalog filters: the browse/search argument surface ─────────────────────
+
+describe("tag array arguments", () => {
+  it("normalizes, deduplicates, and accepts an empty replacement", () => {
+    const args = validateToolArgs("mindvault_set_tags", {
+      resourceId: "res-001",
+      tags: [" Dataset ", "dataset", "API"],
+    });
+    expect(requiredTagArray(args, "tags")).toEqual(["dataset", "api"]);
+    expect(
+      requiredTagArray(
+        validateToolArgs("mindvault_set_tags", { resourceId: "res-001", tags: [] }),
+        "tags",
+      ),
+    ).toEqual([]);
+  });
+
+  it("accepts the documented comma-separated convenience form", () => {
+    const args = validateToolArgs("mindvault_set_tags", {
+      resourceId: "res-001",
+      tags: "dataset, research",
+    });
+    expect(requiredTagArray(args, "tags")).toEqual(["dataset", "research"]);
+  });
+
+  it("rejects invalid tag arrays with a stable issue code", () => {
+    const tooMany = expectInvalid("mindvault_set_tags", {
+      resourceId: "res-001",
+      tags: Array.from({ length: 9 }, (_, i) => `tag-${i}`),
+    });
+    expect(tooMany.issues[0].code).toBe("invalid_tag_array");
+
+    const invalidCharacter = expectInvalid("mindvault_set_tags", {
+      resourceId: "res-001",
+      tags: ["not valid"],
+    });
+    expect(invalidCharacter.issues[0].code).toBe("invalid_tag_array");
+  });
+});
 
 describe("catalog filter arguments", () => {
   it("accepts every sort value on browse and on search", () => {

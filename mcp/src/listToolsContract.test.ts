@@ -165,6 +165,8 @@ function sampleValue(spec: ArgumentSpec): unknown {
       return "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08";
     case "tag_array":
       return ["sample"];
+    case "string_array":
+      return ["contract-probe"];
     case "string":
       // `contract-probe` satisfies every string pattern in use (resource ids,
       // profile names, metadata pointers are all covered by the looser ones);

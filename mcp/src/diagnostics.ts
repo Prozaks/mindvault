@@ -19,6 +19,10 @@ import {
   resolveStellarNetwork,
   validateNetworkConfig,
 } from "@mindvault/registry-client";
+import {
+  isExplicitMainnetDenial,
+  unsafeMainnetAllow,
+} from "./mainnetGuardrails.js";
 
 export type DiagnosticSeverity = "error" | "warning";
 
@@ -175,6 +179,31 @@ export function collectStartupDiagnostics(
       severity: "warning",
       message: `Unrecognized value ${JSON.stringify(metrics)}; metrics stay disabled.`,
       expected: "1/true/yes/on to enable, or leave unset",
+    });
+  }
+
+  // MINDVAULT_ALLOW_MAINNET (#606) — the mainnet guardrail parses this value
+  // fail-safe: only 1/true/yes widen the mutation policy, everything else
+  // keeps per-call confirmation. A set value that unlocks nothing is therefore
+  // harmless but almost certainly unintended — a bare "$MINDVAULT_ALLOW_MAINNET"
+  // template placeholder left unexpanded, `on`/`enabled` from another config
+  // dialect, or a plain typo. Silently doing nothing is the confusing kind of
+  // safe; say so at startup. Explicit denials (0/false/no/off) re-affirm the
+  // default on purpose and stay quiet. A warning, not an error: the fallback
+  // is exactly the safe default, so there is nothing to fix before starting.
+  const allowMainnet = env.MINDVAULT_ALLOW_MAINNET;
+  if (
+    typeof allowMainnet === "string" &&
+    allowMainnet.trim() !== "" &&
+    !unsafeMainnetAllow(allowMainnet) &&
+    !isExplicitMainnetDenial(allowMainnet)
+  ) {
+    diagnostics.push({
+      variable: "MINDVAULT_ALLOW_MAINNET",
+      severity: "warning",
+      message: `Value ${JSON.stringify(allowMainnet)} does not unlock mainnet mutations; per-call confirmMainnet remains required.`,
+      expected:
+        "unset for per-call confirmation, 1/true/yes to allow gated tools without confirmMainnet, or 0/false/no/off to deny explicitly",
     });
   }
 

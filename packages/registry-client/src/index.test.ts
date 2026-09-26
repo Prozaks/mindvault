@@ -230,6 +230,7 @@ describe("generated bindings (drift guard)", () => {
     "set_price_many",
     "set_royalty_recipient",
     "set_tags",
+    "top_tags",
     "set_terms_hash",
     "set_verification_status",
     "settle_payment",

@@ -126,11 +126,33 @@ pub struct CatalogPage {
     pub items: Vec<Resource>,     // this page of resources (insertion order)
     pub next_cursor: Option<u32>, // next catalog index for `list`/`list_page`, or None at end-of-list
 }
+
+pub struct TagPopularity {
+    pub tag: String,
+    pub count: u32,
+}
 ```
 
 Clients should paginate by passing `next_cursor` back as `cursor`/`start` instead of
 recomputing offsets from `items.len()`. `list(start, limit)` remains available and
 returns only the `items` body for existing callers.
+
+### Tag popularity
+
+`top_tags(limit)` returns `TagPopularity` entries sorted by descending
+successful-registration count, with lexicographic tag order for ties. Tags are
+normalized to the same lowercase, trimmed form used by the tag index. The
+contract keeps a per-tag `u32` counter and a bounded top-N materialized view;
+the response is capped at `TOP_TAGS_CAP` (20), and a zero limit returns an empty
+list. Each counter saturates at `u32::MAX`.
+
+Counts represent successful registrations carrying the tag at registration time.
+`set_tags` and tombstoning do not rewrite this historical signal, and a failed
+registration never changes it. Resources already stored when this feature is
+installed are not backfilled, because their original registration-time tags
+cannot be reconstructed after `set_tags`; the counters cover registrations
+processed after introduction. The derived stats index is not part of the
+`Resource` schema, so `RESOURCE_SCHEMA_VERSION` does not change for this feature.
 
 ### Fee / royalty configuration
 

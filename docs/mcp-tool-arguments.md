@@ -50,8 +50,8 @@ Error: Unknown tool: mindvault_by. Available tools: mindvault_agent_status, mind
 
 Each issue carries a stable code (`unknown_argument`, `missing_required`,
 `wrong_type`, `empty_string`, `too_short`, `too_long`, `pattern_mismatch`,
-`not_in_enum`, `invalid_hash`, `not_an_object`) for clients that want to branch
-on the failure rather than parse prose.
+`not_in_enum`, `invalid_hash`, `invalid_tag_array`, `not_an_object`) for clients
+that want to branch on the failure rather than parse prose.
 
 ---
 
@@ -137,7 +137,7 @@ accepted spelling the agent used:
 | flag                   | coerced to a real boolean     |
 | `txHash`               | lowercased bare hex           |
 | `expectedMetadataHash` | canonical `sha256:<hex>` form |
-| `attestationHash`      | trimmed and compared exactly  |
+| string_array           | per-entry trimmed, empties dropped; case and duplicates kept (unlike `tag_array`, entries are data selectors, not on-chain tags) |
 
 ---
 
@@ -153,3 +153,22 @@ error. They now fail like every other invalid call, so an agent can rely on
   `"Provide a transaction hash to look up."`)
 
 Valid calls are unaffected.
+
+### `mindvault_publish_template`
+
+This tool is **read-only** — it makes no API calls, no payments, and touches no
+wallet state. It returns a pre-filled publish spec (JSON) that an agent can
+review and override before passing to `mindvault_publish`.
+
+Key points:
+
+- `resourceType` is required; all other arguments are optional overrides.
+- When a caller-supplied value is present, it wins over the type default.
+- `tags` **replaces** the type-default tag set; it does not merge with it.
+- Fields that still contain a placeholder (`<HASH>` or `<CID>`) are called out
+  in `nextSteps`, so the agent knows what must be filled in before publishing.
+- The `metadataPointer` override must start with one of the accepted prefixes
+  (`ipfs://`, `ar://`, `http(s)://`, `sha256:`, `sha-256:`, or `0x`). The
+  type-default pointer (e.g. `sha256:<HASH>`) is a format hint, not a valid
+  pointer, and must be replaced with a real hash or CID before calling
+  `mindvault_publish`.

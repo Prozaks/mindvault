@@ -48,6 +48,7 @@ pub const MAX_RESOURCE_ID_LEN: u32 = 24;
 /// easy to find, document, and change in a single place instead of
 /// scattered `limit.min(20)` literals.
 pub const LIST_PAGE_CAP: u32 = 20;
+pub const TOP_TAGS_CAP: u32 = 20;
 /// Maximum number of resources that can be registered in a single batch
 /// via `register_batch`. Keeps execution bounded and prevents transaction
 /// timeouts.
@@ -132,6 +133,7 @@ pub const METHOD_SCHEMA: &[(&str, &str)] = &[
     ("list_listed", "—"),
     ("list_by_creator", "—"),
     ("list_by_tag", "—"),
+    ("top_tags", "—"),
     ("list_by_dispute_status", "—"),
     ("list_by_verification_status", "—"),
     // ── Verification ──────────────────────────────────────────────────────
@@ -555,6 +557,13 @@ pub struct RegisterEvent {
 pub struct CatalogPage {
     pub items: Vec<Resource>,
     pub next_cursor: Option<u32>,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct TagPopularity {
+    pub tag: String,
+    pub count: u32,
 }
 
 #[contracttype]
@@ -1754,6 +1763,27 @@ impl VaultRegistry {
             }
             idx += 1;
         }
+        result
+    }
+
+    pub fn top_tags(env: Env, limit: u32) -> Vec<TagPopularity> {
+        let page_size = limit.min(TOP_TAGS_CAP);
+        if page_size == 0 {
+            return Vec::new(&env);
+        }
+
+        let stats: Vec<TagPopularity> = env
+            .storage()
+            .instance()
+            .get(&DataKey::TopTags)
+            .unwrap_or_else(|| Vec::new(&env));
+        let mut result: Vec<TagPopularity> = Vec::new(&env);
+        let mut i = 0u32;
+        while i < stats.len() && result.len() < page_size {
+            result.push_back(stats.get(i).unwrap());
+            i += 1;
+        }
+        Self::bump_instance(&env);
         result
     }
 
@@ -3267,6 +3297,13 @@ impl VaultRegistry {
                 Error::InvalidTag,
             )?;
             let normalized = Self::normalize_tag(env, &tag);
+            Self::validate_bounded_string(
+                &normalized,
+                1,
+                MAX_TAG_LEN,
+                Error::InvalidTag,
+                Error::InvalidTag,
+            )?;
             for j in 0..norm.len() {
                 if norm.get(j).unwrap() == normalized {
                     // Two tags that normalize to the same value (e.g. "ML"
@@ -3663,6 +3700,79 @@ impl VaultRegistry {
         }
     }
 
+    fn load_top_tags(env: &Env) -> Vec<TagPopularity> {
+        env.storage()
+            .instance()
+            .get(&DataKey::TopTags)
+            .unwrap_or_else(|| Vec::new(env))
+    }
+
+    fn tag_popularity_precedes(left: &TagPopularity, right: &TagPopularity) -> bool {
+        if left.count != right.count {
+            return left.count > right.count;
+        }
+        Self::string_bytes(&left.tag) < Self::string_bytes(&right.tag)
+    }
+
+    fn update_top_tags(env: &Env, tag: &String, count: u32) {
+        let mut top = Self::load_top_tags(env);
+        let mut existing = None;
+        for i in 0..top.len() {
+            if top.get(i).unwrap().tag == *tag {
+                existing = Some(i);
+                break;
+            }
+        }
+        if let Some(index) = existing {
+            top.remove_unchecked(index);
+        }
+
+        let candidate = TagPopularity {
+            tag: tag.clone(),
+            count,
+        };
+        let mut insert_at = top.len();
+        for i in 0..top.len() {
+            if Self::tag_popularity_precedes(&candidate, &top.get(i).unwrap()) {
+                insert_at = i;
+                break;
+            }
+        }
+
+        if existing.is_some() || top.len() < TOP_TAGS_CAP || insert_at < top.len() {
+            let mut next: Vec<TagPopularity> = Vec::new(env);
+            for i in 0..top.len() {
+                if i == insert_at {
+                    next.push_back(candidate.clone());
+                }
+                next.push_back(top.get(i).unwrap());
+            }
+            if insert_at == top.len() {
+                next.push_back(candidate);
+            }
+            if next.len() > TOP_TAGS_CAP {
+                next.remove_unchecked(TOP_TAGS_CAP);
+            }
+            env.storage().instance().set(&DataKey::TopTags, &next);
+        }
+    }
+
+    fn increment_tag_popularity(env: &Env, tags: &Vec<String>) {
+        if tags.is_empty() {
+            return;
+        }
+
+        for i in 0..tags.len() {
+            let tag = tags.get(i).unwrap();
+            let count_key = DataKey::TagCount(tag.clone());
+            let current: u32 = env.storage().instance().get(&count_key).unwrap_or(0);
+            let next = current.saturating_add(1);
+            env.storage().instance().set(&count_key, &next);
+            Self::update_top_tags(env, &tag, next);
+        }
+        Self::bump_instance(env);
+    }
+
     /// Add `id` to the `TagIndex` entry for each tag in `tags`.
     fn tag_index_add(env: &Env, tags: &Vec<String>, id: &String) {
         for i in 0..tags.len() {
@@ -3803,6 +3913,7 @@ impl VaultRegistry {
 
         // Maintain tag index: add id to each tag's index entry.
         Self::tag_index_add(&env, &norm_tags, &id);
+        Self::increment_tag_popularity(&env, &norm_tags);
 
         let event = RegisterEvent {
             id: id.clone(),

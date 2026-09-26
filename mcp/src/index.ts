@@ -51,7 +51,12 @@ import {
   createMetricsRecorder,
   measureTool,
   metricsEnabledFromEnv,
+  metricsExportLine,
+  metricsExportToConsoleEnabled,
+  normalizeMetricsExportFormat,
   resolveToolDurationBudget,
+  serializeMetricsExport,
+  type MetricsExportFormat,
 } from "./metrics.js";
 import {
   createMockFetch,
@@ -84,6 +89,7 @@ import {
   TOOL_ARGUMENT_SPECS,
   TOOLS_WITHOUT_ARG_VALIDATION,
   UnknownToolError,
+  requiredStringArray,
   validateToolArgs,
   type ValidatedArgs,
 } from "./validation.js";
@@ -105,6 +111,14 @@ import {
   type PublishProgressReporter,
   type PublishStatusFetch,
 } from "./publishStatus.js";
+import {
+  normalizeIntervalMs as normalizeResourceIntervalMs,
+  normalizeTimeoutMs as normalizeResourceTimeoutMs,
+  normalizeWaitFlag as normalizeResourceWaitFlag,
+  subscribeResource,
+  type ResourceProgressReporter,
+  type ResourceSubscriptionSnapshot,
+} from "./resourceSubscriptionTool.js";
 import { type ApiResponse } from "./apiResponse.js";
 import { safeErrorMessage, safeLog } from "./redaction.js";
 import { assertAutoPaymentWithinCeiling, assertTransactionFeeWithinCeiling } from "./paymentCeiling.js";
@@ -164,13 +178,18 @@ import {
   sanitizeServiceUrl,
   SPONSORED_CREATE_PATH,
 } from "./sponsoredDiagnostics.js";
+import { describeMetadataPointerHash, parseMetadataHash } from "./metadataHash.js";
 import {
   checkWalletIntegrity,
   sponsoredWalletIntegrityError,
   unownedWalletNote,
   type DerivePublicKey,
 } from "./sponsoredWallet.js";
-import { parseMetadataHash } from "./metadataHash.js";
+import {
+  applyPublishTemplate,
+  KNOWN_RESOURCE_TYPES,
+  type KnownResourceType,
+} from "./publishTemplate.js";
 import {
   applyCatalogSort,
   applyClientCatalogFilters,
@@ -1164,6 +1183,53 @@ export async function txStatus(txHash: string): Promise<string> {
   );
 }
 
+/**
+ * One `getTransaction` round trip shaped for settlement polling (#888). The
+ * non-terminal statuses (`NOT_FOUND`, `IN_PROGRESS`, `UNKNOWN`) come back as-is
+ * so the poller can decide when a wait window is exhausted.
+ */
+async function fetchTransactionLookup(txHash: string): Promise<TransactionLookup> {
+  const res = await sorobanRpcFetch(
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "getTransaction",
+        params: { hash: txHash },
+      }),
+    },
+    "POST soroban getTransaction",
+  );
+  if (!res.ok)
+    throwHttpError({
+      operation: `Soroban RPC error: ${res.status}`,
+      source: "soroban",
+      status: res.status,
+      data: await res.text().catch(() => null),
+    });
+  const data: any = await res.json();
+  if (data.error)
+    throw mcpError(
+      mapRegistryError({
+        operation: "RPC error",
+        message: JSON.stringify(data.error),
+        source: "soroban",
+      }),
+    );
+  const tx = data.result;
+  const status = typeof tx?.status === "string" ? tx.status : "UNKNOWN";
+  return {
+    hash: txHash,
+    found: status !== "NOT_FOUND",
+    status,
+    ledger: typeof tx?.ledger === "number" ? tx.ledger : null,
+    ledgerCloseTime:
+      typeof tx?.createdAt === "number" ? new Date(tx.createdAt * 1000).toISOString() : null,
+  };
+}
+
 // ── Tool handlers ─────────────────────────────────────────────────────────────
 
 function hasPublicErrorDetail(data: unknown): boolean {
@@ -1298,6 +1364,273 @@ async function walletInfoOutcome(): Promise<ToolOutcome> {
 
 export async function walletInfo(): Promise<string> {
   return outcomeText(await walletInfoOutcome());
+}
+
+// ── Wallet balances (#889) ───────────────────────────────────────────────────
+
+const STELLAR_PUBLIC_KEY_PATTERN = /^G[A-Z2-7]{55}$/;
+
+interface WalletBalanceRow {
+  profile?: string;
+  active?: boolean;
+  publisherRegistered?: boolean;
+  address: string;
+  details: BalanceDetails | null;
+  note: string | null;
+}
+
+async function loadBalanceRow(input: {
+  address: string;
+  profile?: string;
+  active?: boolean;
+  publisherRegistered?: boolean;
+}): Promise<WalletBalanceRow> {
+  if (!input.address || !STELLAR_PUBLIC_KEY_PATTERN.test(input.address)) {
+    return {
+      ...input,
+      address: input.address,
+      details: null,
+      note: "Address does not look like a Stellar public key (G…, 56 chars).",
+    };
+  }
+  try {
+    return {
+      ...input,
+      address: input.address,
+      details: await getBalanceDetails(input.address),
+      note: null,
+    };
+  } catch (err) {
+    return {
+      ...input,
+      address: input.address,
+      details: null,
+      note: `Balance lookup failed: ${safeErrorMessage(err)}`,
+    };
+  }
+}
+
+function trimDecimalZeros(value: string): string {
+  if (!value.includes(".")) return value;
+  return value.replace(/0+$/, "").replace(/\.$/, "");
+}
+
+function sumBalances(values: string[]): string {
+  const total = values.reduce((sum, value) => sum + (parseFloat(value) || 0), 0);
+  return trimDecimalZeros(total.toFixed(7));
+}
+
+function balanceRowStructured(row: WalletBalanceRow): Record<string, unknown> {
+  return {
+    profile: row.profile ?? null,
+    address: row.address,
+    active: row.active ?? null,
+    publisherRegistered: row.publisherRegistered ?? null,
+    xlmBalance: row.details?.xlmBalance ?? null,
+    xlmReserve: row.details?.xlmReserve ?? null,
+    xlmAvailable: row.details?.xlmAvailable ?? null,
+    usdcBalance: row.details?.usdcBalance ?? null,
+    usdcStatus: row.details?.status ?? null,
+    note: row.note,
+  };
+}
+
+/**
+ * Balances for every agent wallet plus the platform wallet (from
+ * PLATFORM_WALLET_ADDRESS, when configured). One wallet failing to load does
+ * not fail the tool: its row carries a note and the rest of the list stands.
+ */
+async function walletBalancesOutcome(): Promise<ToolOutcome> {
+  const agentNames = Object.entries(profiles)
+    .filter(([, profile]) => !!profile.wallet?.publicKey)
+    .map(([name]) => name)
+    .sort();
+
+  const agents = await Promise.all(
+    agentNames.map((name) =>
+      loadBalanceRow({
+        address: profiles[name].wallet?.publicKey ?? "",
+        profile: name,
+        active: name === activeProfileName,
+        publisherRegistered: profiles[name].apiKey != null,
+      }),
+    ),
+  );
+
+  const platformAddress = PLATFORM_WALLET_ADDRESS?.trim() || null;
+  const platform = platformAddress ? await loadBalanceRow({ address: platformAddress }) : null;
+
+  const usdcTotal = sumBalances(
+    [...agents, ...(platform ? [platform] : [])]
+      .filter((row) => row.details?.usdcBalance)
+      .map((row) => row.details!.usdcBalance),
+  );
+  const xlmTotal = sumBalances(
+    [...agents, ...(platform ? [platform] : [])]
+      .filter((row) => row.details?.xlmBalance)
+      .map((row) => row.details!.xlmBalance),
+  );
+
+  const lines: Array<string | null> = ["Wallet balances", `Horizon: ${HORIZON_URL}`];
+
+  if (platform) {
+    const d = platform.details;
+    lines.push(
+      `Platform (PLATFORM_WALLET_ADDRESS): ${platform.address}`,
+      d
+        ? `  XLM ${d.xlmBalance} (available ${d.xlmAvailable}) · USDC ${d.usdcBalance} (${d.status})`
+        : `  ${platform.note ?? "unavailable"}`,
+    );
+  } else {
+    lines.push("Platform wallet: not configured (set PLATFORM_WALLET_ADDRESS).");
+  }
+
+  lines.push(
+    agents.length > 0 ? `Agent wallets (${agents.length}):` : "Agent wallets: none configured.",
+  );
+  for (const row of agents) {
+    const active = row.active ? " [active]" : "";
+    if (row.details) {
+      lines.push(
+        `  - ${row.profile}${active}: ${row.address}`,
+        `      XLM ${row.details.xlmBalance} (available ${row.details.xlmAvailable}) · USDC ${row.details.usdcBalance} (${row.details.status})`,
+        row.note ? `      Note: ${row.note}` : null,
+      );
+    } else {
+      lines.push(`  - ${row.profile}${active}: ${row.address} — ${row.note ?? "unavailable"}`);
+    }
+  }
+  lines.push(`Totals (unique wallets): USDC ${usdcTotal} · XLM ${xlmTotal}`);
+  lines.push(
+    "Publisher payout target on the server is PAY_TO; this list mirrors the agent wallets and PLATFORM_WALLET_ADDRESS.",
+  );
+
+  return {
+    text: lines.filter((line) => line !== null).join("\n"),
+    structured: {
+      source: "horizon",
+      requestedAt: new Date().toISOString(),
+      platform: platform
+        ? {
+            configured: true,
+            ...balanceRowStructured(platform),
+          }
+        : null,
+      agents: agents.map((row) => balanceRowStructured(row)),
+      count: agents.length,
+      statistics: { totalUsdc: usdcTotal, totalXlm: xlmTotal },
+      message:
+        agents.length > 0
+          ? `Listed ${agents.length} agent wallet(s).`
+          : "No agent wallets configured.",
+    },
+  };
+}
+
+// ── Server endpoints (#890) ──────────────────────────────────────────────────
+
+const HTTP_METHOD_ORDER = ["get", "post", "put", "patch", "delete"];
+
+function methodIndex(method: string): number {
+  const index = HTTP_METHOD_ORDER.indexOf(method);
+  return index === -1 ? HTTP_METHOD_ORDER.length : index;
+}
+
+/**
+ * Surface the MindVault HTTP API's endpoints from its published OpenAPI spec
+ * (`${BASE_URL}/openapi.json`), so an agent can discover what the server
+ * exposes without guessing paths. Read-only and network-only.
+ */
+async function serverEndpointsOutcome(): Promise<ToolOutcome> {
+  const res = await jsonFetch(`${BASE_URL}/openapi.json`);
+  if (!res.ok)
+    throwHttpError({
+      operation: "OpenAPI spec fetch failed",
+      source: "api",
+      status: res.status,
+      data: res.data,
+    });
+  const spec =
+    res.data && typeof res.data === "object" && !Array.isArray(res.data)
+      ? (res.data as Record<string, any>)
+      : null;
+  const paths =
+    spec?.paths && typeof spec.paths === "object" ? (spec.paths as Record<string, any>) : {};
+
+  const operations: Array<{
+    method: string;
+    path: string;
+    operationId: string | null;
+    tags: string[];
+    summary: string | null;
+  }> = [];
+  for (const [path, item] of Object.entries(paths)) {
+    if (!item || typeof item !== "object") continue;
+    for (const [method, op] of Object.entries(item as Record<string, unknown>)) {
+      if (typeof op !== "object" || op === null) continue;
+      const operation = op as Record<string, unknown>;
+      operations.push({
+        method: method.toUpperCase(),
+        path,
+        operationId: typeof operation.operationId === "string" ? operation.operationId : null,
+        tags: Array.isArray(operation.tags)
+          ? (operation.tags as unknown[]).filter((tag): tag is string => typeof tag === "string")
+          : [],
+        summary: typeof operation.summary === "string" ? operation.summary : null,
+      });
+    }
+  }
+  operations.sort(
+    (a, b) =>
+      a.path.localeCompare(b.path) ||
+      methodIndex(a.method.toLowerCase()) - methodIndex(b.method.toLowerCase()),
+  );
+
+  const info =
+    spec && typeof spec.info === "object" ? (spec.info as Record<string, unknown>) : null;
+  const serverName = info && typeof info.title === "string" ? info.title : null;
+  const openapiVersion =
+    typeof spec?.openapi === "string"
+      ? spec.openapi
+      : typeof spec?.swagger === "string"
+        ? spec.swagger
+        : null;
+
+  const uniquePaths = [...new Set(operations.map((op) => op.path))].sort((a, b) =>
+    a.localeCompare(b),
+  );
+
+  return {
+    text: [
+      "Server endpoints",
+      `Base URL: ${BASE_URL}`,
+      `Source: OpenAPI spec (${openapiVersion ?? "unknown"})${serverName ? ` — ${serverName}` : ""}`,
+      `Endpoints: ${operations.length}`,
+      ...operations.map((op) => {
+        const id = op.operationId ? ` (${op.operationId})` : "";
+        const summary = op.summary ? ` — ${op.summary}` : "";
+        const tags = op.tags.length > 0 ? ` [${op.tags.join(", ")}]` : "";
+        return `  ${op.method.padEnd(6)} ${op.path}${tags}${id}${summary}`;
+      }),
+      operations.length === 0 ? "No parseable operations found in the published spec." : null,
+      "Reflects the deployment configured by MINDVAULT_URL; for discovery only.",
+    ]
+      .filter((line): line is string => line !== null)
+      .join("\n"),
+    structured: {
+      source: "openapi",
+      baseUrl: BASE_URL,
+      openapi: openapiVersion,
+      server: info,
+      endpointCount: operations.length,
+      operations,
+      paths: uniquePaths,
+      message:
+        operations.length > 0
+          ? `Discovered ${operations.length} endpoint(s) across ${uniquePaths.length} path(s) from ${BASE_URL}/openapi.json.`
+          : "No operations could be parsed from the published OpenAPI spec.",
+    },
+  };
 }
 
 /** Switch the active profile, creating it if new. */
@@ -1646,6 +1979,40 @@ export async function publishStatus(
   return JSON.stringify(snapshot, null, 2);
 }
 
+export async function subscribeResourceHandler(
+  args: {
+    resourceId?: string;
+    wait?: unknown;
+    timeoutMs?: unknown;
+    intervalMs?: unknown;
+  },
+  onProgress?: ResourceProgressReporter,
+): Promise<string> {
+  const resourceId = (args.resourceId ?? "").trim();
+  if (!resourceId) {
+    throw new Error(
+      "resourceId is required. Pass the id from mindvault_browse, mindvault_search, or mindvault_preview (e.g. 'cm7x8y9z').",
+    );
+  }
+
+  const wait = normalizeResourceWaitFlag(args.wait);
+  const timeoutMs = normalizeResourceTimeoutMs(args.timeoutMs);
+  const intervalMs = normalizeResourceIntervalMs(args.intervalMs);
+
+  const snapshot: ResourceSubscriptionSnapshot = await subscribeResource(
+    {
+      resourceId,
+      wait,
+      timeoutMs,
+      intervalMs,
+      sleep: sleepMs,
+    },
+    onProgress,
+  );
+
+  return JSON.stringify(snapshot, null, 2);
+}
+
 async function register(name: string, email: string, walletAddress?: string): Promise<string> {
   const wallet = requireWallet();
   const res = await jsonFetch(`${BASE_URL}/publishers`, {
@@ -1824,6 +2191,9 @@ export async function buy(
   estimatedPrice?: string | null,
   onProgress?: (progress: number, total?: number, message?: string) => Promise<void>,
   maxAutoPayUsdc?: string,
+  wait?: unknown,
+  timeoutMs?: unknown,
+  intervalMs?: unknown,
 ): Promise<string> {
   if (dryRun) {
     return JSON.stringify(
@@ -1914,6 +2284,48 @@ export async function buy(
     logger.error("MindVault MCP: failed to persist purchase receipt:", safeErrorMessage(err));
   }
 
+  // Settlement confirmation (#888): when the caller passes wait: true we poll
+  // the payment transaction until it settles or the deadline passes. The
+  // progress counter continues after step 3 and stays monotonic while the
+  // poller reports; without wait the counter is untouched and the summary
+  // simply carries an un-polled settlement block.
+  const waitForSettlement = normalizeSettlementWaitFlag(wait);
+  const settleTimeoutMs = normalizeSettlementTimeoutMs(timeoutMs);
+  const settleIntervalMs = normalizeSettlementIntervalMs(intervalMs);
+  let settlement: SettlementSnapshot = buildSettlementSnapshot({
+    txHash,
+    wait: waitForSettlement,
+    skipped: waitForSettlement && !txHash,
+    result: null,
+  });
+  let settleProgressEmitted = 0;
+  let settleProgressTotal = 0;
+
+  if (waitForSettlement && txHash) {
+    const settleSteps = estimateSettlementSteps(true, settleTimeoutMs, settleIntervalMs);
+    settleProgressTotal = settleSteps;
+    await onProgress?.(4, 4 + settleSteps, "Waiting for payment settlement");
+    const result = await pollSettlement({
+      txHash,
+      wait: true,
+      timeoutMs: settleTimeoutMs,
+      intervalMs: settleIntervalMs,
+      fetchTransaction: fetchTransactionLookup,
+      onProgress: async (p, total, message) => {
+        settleProgressEmitted = p;
+        settleProgressTotal = total ?? settleSteps;
+        await onProgress?.(4 + p, 4 + (total ?? settleSteps), message);
+      },
+      sleep: sleepMs,
+    });
+    settlement = buildSettlementSnapshot({
+      txHash,
+      wait: true,
+      skipped: false,
+      result,
+    });
+  }
+
   const summary = {
     before: beforeState,
     after: {
@@ -1922,9 +2334,10 @@ export async function buy(
     },
     changedFields: beforeState ? ["purchased"] : ["id", "title", "price", "accessUrl", "purchased"],
     txHash,
+    settlement,
   };
 
-  await onProgress?.(4, 4, "Done");
+  await onProgress?.(4 + settleProgressEmitted, 4 + settleProgressTotal, "Done");
 
   return JSON.stringify(summary, null, 2);
 }
@@ -3146,10 +3559,11 @@ async function checkBindings(): Promise<string> {
 }
 
 /**
- * Return opt-in tool-level metrics as JSON. Pass reset=true to clear counters
- * after reading. Text-only when disabled (still JSON so structuredContent works).
+ * Return opt-in tool-level metrics in the requested export format (json or
+ * otlp). Pass reset=true to clear counters after reading. Text-only when
+ * disabled (still JSON so structuredContent works).
  */
-function toolMetrics(reset: boolean): string {
+function toolMetrics(reset: boolean, format: MetricsExportFormat): string {
   const snapshot = metrics.snapshot();
   if (reset) metrics.reset();
   if (!snapshot.enabled) {
@@ -3163,7 +3577,7 @@ function toolMetrics(reset: boolean): string {
       2,
     );
   }
-  return JSON.stringify(snapshot, null, 2);
+  return serializeMetricsExport(snapshot, format);
 }
 
 const SELF_VALIDATING_TOOLS = new Set(TOOLS_WITHOUT_ARG_VALIDATION);
@@ -3316,6 +3730,9 @@ async function dispatchToolOutcome(
           undefined,
           onProgress,
           optionalString(dryRunArgs, "maxAutoPayUsdc"),
+          args.wait,
+          args.timeoutMs,
+          args.intervalMs,
         );
       case "mindvault_purchase_history":
         return purchaseHistoryTool(rawRecord);
@@ -3346,6 +3763,13 @@ async function dispatchToolOutcome(
         );
       case "mindvault_registry_lookup":
         return registryLookup(requiredString(args, "resourceId"));
+      case "mindvault_batch_catalog_lookup":
+        return batchCatalogLookupOutcome(
+          requiredStringArray(args, "resourceIds"),
+          flag(args, "refetch"),
+        );
+      case "mindvault_preview_metadata_hash":
+        return previewMetadataHashOutcome(requiredString(args, "resourceId"));
       case "mindvault_registry_list":
         return registryList(
           optionalInt(args, "start", REGISTRY_LIST_DEFAULT_START),
@@ -3379,7 +3803,7 @@ async function dispatchToolOutcome(
       case "mindvault_restore_state":
         return restoreStateTool(requiredString(args, "blob"), requiredString(args, "passphrase"));
       case "mindvault_metrics":
-        return toolMetrics(flag(args, "reset"));
+        return toolMetrics(flag(args, "reset"), normalizeMetricsExportFormat(args.format));
       case "mindvault_check_state_permissions":
         return checkStatePermissionsTool();
       case "mindvault_registry_health":
@@ -3404,6 +3828,10 @@ async function dispatchToolOutcome(
         return debugBundleTool(rawRecord);
       case "mindvault_recover_catalog_cache":
         return recoverCatalogCache();
+      case "mindvault_wallet_balances":
+        return walletBalancesOutcome();
+      case "mindvault_server_endpoints":
+        return serverEndpointsOutcome();
       default:
         throw new Error(`Unknown tool: ${name}`);
     }
@@ -3470,6 +3898,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
     const result = await measureTool(metrics, name, () =>
       dispatchToolOutcome(name, args, onProgress),
     );
+    // Opt-in structured telemetry stream (#891): one OTLP line to stderr per
+    // tool call when MINDVAULT_METRICS_EXPORT_CONSOLE is set, so a log
+    // collector or otel-collector can tail the export without touching stdout.
+    if (metricsExportToConsoleEnabled(process.env) && metrics.enabled) {
+      console.error(metricsExportLine(metrics.snapshot(), "otlp"));
+    }
     return normalizeToolResult(name, result, hasOutputSchema);
   } catch (err: any) {
     const mapped = mappedErrorOf(err);

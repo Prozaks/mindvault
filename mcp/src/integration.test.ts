@@ -57,6 +57,8 @@ describe("MCP integration harness", () => {
     expect(names).toContain("mindvault_registry_list");
     expect(names).toContain("mindvault_registry_count");
     expect(names).toContain("mindvault_setup_wallet");
+    expect(names).toContain("mindvault_set_tags");
+
     expect(names.length).toBeGreaterThanOrEqual(15);
 
     for (const tool of tools) {

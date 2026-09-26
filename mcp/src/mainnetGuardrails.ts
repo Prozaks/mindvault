@@ -10,6 +10,30 @@
  *   2. Env `MINDVAULT_ALLOW_MAINNET=1` (or `true` / `yes`)
  *
  * Errors are deterministic and agent-safe (no secrets, no stack traces).
+ *
+ * Safer defaults for the env override (#606): the operator-side unlock is
+ * parsed through {@link mainnetMutationPolicyFromEnv} rather than a bare
+ * truthiness check, and the safe default is formalized as
+ * {@link DEFAULT_MAINNET_MUTATION_POLICY} — per-call confirmation. The env
+ * var must *deliberately* say so to widen the blast radius:
+ *
+ *   - unset / empty / `0` / `false` / `no` / `off` ⇒ `per-call-confirm`
+ *     (unset and empty behaved this way before; the explicit denials are new
+ *     spellings of the same default, so an operator can write intent, and so
+ *     a template variable like `$MINDVAULT_ALLOW_MAINNET` left unexpanded
+ *     cannot unlock anything)
+ *   - any other value — including ones a future contributor might consider
+ *     "obviously truthy" — stays on the safe default. A typo in a safety
+ *     setting must fail towards *more* confirmation, not less.
+ *   - only `1` / `true` / `yes` widen the policy to `allow-all`, exactly as
+ *     documented.
+ *
+ * `mainnetAllowedFromEnv` keeps its previous observable behaviour for every
+ * value it accepted before; the policy functions make the default explicit so
+ * callers other than the guardrail (diagnostics, docs generators) can report
+ * which mode the server is actually in. Startup diagnostics flag an
+ * ineffective value — a set variable that unlocks nothing — see
+ * `diagnostics.ts`.
  */
 
 /** Tools that mutate state or spend funds — gated on mainnet. */
@@ -58,11 +82,74 @@ export function isTruthyConfirm(value: unknown): boolean {
   return false;
 }
 
-/** Operator env override that unlocks all mainnet mutations for this process. */
-export function mainnetAllowedFromEnv(env: NodeJS.ProcessEnv = process.env): boolean {
-  const raw = env.MINDVAULT_ALLOW_MAINNET;
+/**
+ * The default mainnet mutation policy, when `MINDVAULT_ALLOW_MAINNET` says
+ * nothing (or nothing usable): every gated tool needs `confirmMainnet: true`
+ * on the call. Exported so diagnostics and generated references can state the
+ * default without restating the logic.
+ */
+export const DEFAULT_MAINNET_MUTATION_POLICY = "per-call-confirm" as const;
+
+/**
+ * How this server process treats mainnet mutations.
+ *
+ * - `per-call-confirm` — the safe default: every gated tool call must carry
+ *   `confirmMainnet: true`.
+ * - `allow-all` — the operator opted this process out of per-call
+ *   confirmation with `MINDVAULT_ALLOW_MAINNET=1` (or `true` / `yes`). Still
+ *   narrower than it sounds: the paid-operation policy and the auto-pay
+ *   ceiling continue to apply on top of it.
+ */
+export type MainnetMutationPolicy = "per-call-confirm" | "allow-all";
+
+/**
+ * Read the operator's mainnet mutation policy from the environment.
+ *
+ * Fail-safe by construction: anything other than an explicit, documented
+ * opt-in spelling yields {@link DEFAULT_MAINNET_MUTATION_POLICY}. See the
+ * module doc comment for the full value table and the reasoning behind
+ * treating explicit denials and unrecognized values identically.
+ */
+export function mainnetMutationPolicyFromEnv(
+  env: NodeJS.ProcessEnv = process.env,
+): MainnetMutationPolicy {
+  return unsafeMainnetAllow(env.MINDVAULT_ALLOW_MAINNET)
+    ? "allow-all"
+    : DEFAULT_MAINNET_MUTATION_POLICY;
+}
+
+/**
+ * Whether one raw `MINDVAULT_ALLOW_MAINNET` value, on its own, would widen
+ * the policy to `allow-all`.
+ *
+ * Kept separate from {@link mainnetMutationPolicyFromEnv} so the diagnostics
+ * can distinguish "the operator asked for the unsafe mode" from "the operator
+ * set something that does nothing" — a set-but-ineffective value is worth a
+ * warning; an unset one is not.
+ */
+export function unsafeMainnetAllow(raw: unknown): boolean {
   if (raw == null || raw === "") return false;
   return isTruthyConfirm(raw);
+}
+
+/**
+ * Whether a raw `MINDVAULT_ALLOW_MAINNET` value explicitly re-affirms the
+ * safe default (`0` / `false` / `no` / `off`).
+ *
+ * These are recognized denials, not typos: an operator (or a deployment
+ * template) writing one has stated intent, and the resulting behaviour is
+ * exactly the documented default. Startup diagnostics stay quiet about them —
+ * unlike an unrecognized value such as `$MINDVAULT_ALLOW_MAINNET` or `on`,
+ * which unlocks nothing and is almost certainly a mistake worth flagging.
+ */
+export function isExplicitMainnetDenial(raw: unknown): boolean {
+  if (typeof raw !== "string") return false;
+  return new Set(["0", "false", "no", "off"]).has(raw.trim().toLowerCase());
+}
+
+/** Operator env override that unlocks all mainnet mutations for this process. */
+export function mainnetAllowedFromEnv(env: NodeJS.ProcessEnv = process.env): boolean {
+  return mainnetMutationPolicyFromEnv(env) === "allow-all";
 }
 
 /** Whether a tool name is gated on mainnet. */
