@@ -326,6 +326,34 @@ export function mockRegistryLookup(
   );
 }
 
+export function mockVerifyAttestation(
+  resourceId: string,
+  expectedAttestationHash: string,
+  contractId: string,
+): string {
+  const registeredAttestationHash = resourceId === "mock1" ? "mock-attestation-1" : null;
+  const matches =
+    registeredAttestationHash !== null && registeredAttestationHash === expectedAttestationHash;
+  return JSON.stringify(
+    {
+      source: "on-chain (mock)",
+      resourceId,
+      expectedAttestationHash,
+      registeredAttestationHash,
+      matches,
+      verified: matches,
+      summary: matches
+        ? "Attestation hash matches the value registered on-chain."
+        : registeredAttestationHash === null
+          ? "No attestation hash is registered for this resource in mock mode."
+          : "The supplied attestation hash does not match the value registered on-chain.",
+      contract: contractId,
+    },
+    null,
+    2,
+  );
+}
+
 export function mockUpdateMetadata(resourceId: string, metadata: string): string {
   return JSON.stringify(
     {

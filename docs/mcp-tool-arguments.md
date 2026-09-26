@@ -15,17 +15,19 @@ accepts, what a rejection looks like, and which values are normalized.
 
 ## Rules that apply to every tool
 
-| Rule                       | Behavior                                                                                                                               |
-| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| Argument bag               | Must be a JSON object. `null`/omitted is treated as `{}`.                                                                              |
-| Unknown arguments          | **Rejected**, not ignored — a typo is reported instead of silently dropping the value.                                                 |
-| Missing required arguments | Rejected, naming each missing field.                                                                                                   |
-| Strings                    | Trimmed before use; empty (or whitespace-only) is rejected.                                                                            |
-| Booleans ("flags")         | Accept `true`/`false`, `1`/`0`, and the strings `true/false`, `yes/no`, `on/off`, `1/0` (case-insensitive). Anything else is rejected. |
-| Digests                    | Accept the fixed metadata hash format — see [MCP metadata hash format](mcp-metadata-hash.md).                                          |
-| Multiple problems          | Reported together in one error, in schema order.                                                                                       |
-| Determinism                | The same invalid call always produces the same message.                                                                                |
-| Secrets                    | Rejected values are never echoed back — messages describe the field and the expected shape only.                                       |
+| Rule                       | Behavior                                                                                                                                     |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| Argument bag               | Must be a JSON object. `null`/omitted is treated as `{}`.                                                                                    |
+| Unknown arguments          | **Rejected**, not ignored — a typo is reported instead of silently dropping the value.                                                       |
+| Missing required arguments | Rejected, naming each missing field.                                                                                                         |
+| Strings                    | Trimmed before use; empty (or whitespace-only) is rejected.                                                                                  |
+| Booleans ("flags")         | Accept `true`/`false`, `1`/`0`, and the strings `true/false`, `yes/no`, `on/off`, `1/0` (case-insensitive). Anything else is rejected.       |
+| Digests                    | Accept the fixed metadata hash format — see [MCP metadata hash format](mcp-metadata-hash.md).                                                |
+| `attestationHash`          | An opaque verifier-provided string (maximum 64 characters), compared exactly after trimming; it is distinct from the metadata `contentHash`. |
+| On-chain resource ID       | 1–24 lowercase ASCII letters or digits, matching the vault-registry contract.                                                                |
+| Multiple problems          | Reported together in one error, in schema order.                                                                                             |
+| Determinism                | The same invalid call always produces the same message.                                                                                      |
+| Secrets                    | Rejected values are never echoed back — messages describe the field and the expected shape only.                                             |
 
 ---
 

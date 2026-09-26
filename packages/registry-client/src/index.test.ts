@@ -1,9 +1,11 @@
-import { describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import { Networks } from "@stellar/stellar-sdk";
+import { Client as ContractClient } from "@stellar/stellar-sdk/contract";
 import {
   Client,
   Errors,
   createRegistryClient,
+  getAttestationHash,
   listResources,
   networks,
   getNetworkPreset,
@@ -268,6 +270,54 @@ describe("generated bindings (drift guard)", () => {
     }
 
     expect(typeof listResources).toBe("function");
+  });
+});
+
+describe("getAttestationHash", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("reads the deployed contract method and returns its result", async () => {
+    const method = vi.fn().mockResolvedValue({ result: "attestation-1" });
+    vi.spyOn(ContractClient, "from").mockResolvedValue({
+      get_attestation_hash: method,
+    } as never);
+
+    await expect(
+      getAttestationHash({
+        contractId: networks.testnet.defaultRegistryContractId!,
+        rpcUrl: networks.testnet.sorobanRpcUrl,
+        resourceId: "res1",
+      }),
+    ).resolves.toBe("attestation-1");
+    expect(method).toHaveBeenCalledWith({ id: "res1" });
+  });
+
+  it("returns null when the contract has no recorded attestation", async () => {
+    vi.spyOn(ContractClient, "from").mockResolvedValue({
+      get_attestation_hash: vi.fn().mockResolvedValue({ result: null }),
+    } as never);
+
+    await expect(
+      getAttestationHash({
+        contractId: networks.testnet.defaultRegistryContractId!,
+        rpcUrl: networks.testnet.sorobanRpcUrl,
+        resourceId: "res1",
+      }),
+    ).resolves.toBeNull();
+  });
+
+  it("fails clearly when the deployed contract lacks the method", async () => {
+    vi.spyOn(ContractClient, "from").mockResolvedValue({} as never);
+
+    await expect(
+      getAttestationHash({
+        contractId: networks.testnet.defaultRegistryContractId!,
+        rpcUrl: networks.testnet.sorobanRpcUrl,
+        resourceId: "res1",
+      }),
+    ).rejects.toThrow("does not expose get_attestation_hash");
   });
 });
 
