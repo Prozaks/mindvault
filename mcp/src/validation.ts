@@ -31,7 +31,7 @@ import { parseMetadataHash, MetadataHashError, METADATA_HASH_FORMAT_HINT } from 
 import { CATALOG_MAX_LIMIT, CATALOG_SORT_VALUES } from "./catalogFilters.js";
 import { REGISTRY_LIST_MAX_LIMIT } from "./registryPagination.js";
 import { RECEIPT_EXPORT_MAX_LIMIT } from "./receipts.js";
-import { MAX_SETTLEMENT_TIMEOUT_MS, MIN_SETTLEMENT_INTERVAL_MS } from "./settlement.js";
+import { DEBUG_BUNDLE_MAX_AUDIT_LINES } from "./debugBundleSchema.js";
 import { TOOL_DEFINITIONS } from "./tools.js";
 
 // ── Spec model ────────────────────────────────────────────────────────────────
@@ -48,6 +48,11 @@ import { TOOL_DEFINITIONS } from "./tools.js";
  * - `tag_array` — array of discovery tags for set_tags; normalized to lowercase,
  *                 validated against on-chain constraints (≤8 entries, each 1–32 chars,
  *                 only `[a-z0-9_-]`). Accepts a comma-separated string as well.
+ * - `string_array` — array of free-text strings (e.g. batch resource ids),
+ *                 normalized per entry (trimmed, empty entries dropped) with a
+ *                 bounded length. Unlike `tag_array` entries keep their case
+ *                 and duplicates — they are data selectors, not on-chain tags.
+ *                 Accepts a comma-separated string as well.
  *
  * Normalization guidance for tag_array:
  *   - Tags are lowercased before the on-chain call so "Finance" and "finance"
@@ -56,7 +61,14 @@ import { TOOL_DEFINITIONS } from "./tools.js";
  *   - Leading/trailing whitespace is stripped from each tag.
  *   - An empty array (`[]`) is valid and clears all tags from the resource.
  */
-export type ArgumentKind = "string" | "enum" | "flag" | "hash" | "tag_array" | "integer";
+export type ArgumentKind =
+  | "string"
+  | "enum"
+  | "flag"
+  | "hash"
+  | "tag_array"
+  | "string_array"
+  | "integer";
 
 export interface ArgumentSpec {
   kind: ArgumentKind;
@@ -114,6 +126,16 @@ const USDC_AMOUNT: ArgumentSpec = {
   pattern: /^\d+(\.\d+)?$/,
   patternHint: 'a non-negative decimal amount in USDC, e.g. "5.00"',
 };
+
+/**
+ * Batch-size ceiling for tools that take a list of resource ids in one call.
+ *
+ * Bounded so one call cannot fan out into an unbounded number of downstream
+ * lookups: 25 ids is comfortably above what an agent gathers from a single
+ * browse/search page (the API caps page size far below this) and small enough
+ * that the aggregate response still fits the truncation budget.
+ */
+export const BATCH_LOOKUP_MAX_IDS = 25;
 
 /** Confirmation flag for mainnet mutations (see mainnetGuardrails.ts). */
 const CONFIRM_MAINNET: ArgumentSpec = { kind: "flag" };
@@ -194,6 +216,10 @@ const CATALOG_FILTER_ARGS: ToolArgumentSpec = {
 export const TOOLS_WITHOUT_ARG_VALIDATION: readonly string[] = [
   "mindvault_publish_status",
   "mindvault_purchase_history",
+  // items is an array of objects — the generic validator handles only flat
+  // string/flag/hash/integer/enum/tag_array fields. Argument shape is enforced
+  // by the input schema in tools.ts and validated inline in the dispatch handler.
+  "mindvault_publish_batch",
 ];
 
 /**
@@ -204,6 +230,10 @@ export const TOOL_ARGUMENT_SPECS: Record<string, ToolArgumentSpec> = {
   mindvault_setup_wallet: { profile: PROFILE_NAME, confirmMainnet: CONFIRM_MAINNET },
   mindvault_wallet_info: {},
   mindvault_use_profile: { name: { ...PROFILE_NAME, required: true } },
+  mindvault_switch_network_profile: {
+    name: { ...PROFILE_NAME, required: true },
+    network: { kind: "enum", values: ["testnet", "mainnet"], required: true },
+  },
   mindvault_list_profiles: {},
   mindvault_browse: { ...CATALOG_FILTER_ARGS },
   mindvault_search: { ...CATALOG_FILTER_ARGS },
@@ -255,7 +285,7 @@ export const TOOL_ARGUMENT_SPECS: Record<string, ToolArgumentSpec> = {
     intervalMs: { kind: "integer", min: MIN_SETTLEMENT_INTERVAL_MS },
   },
   mindvault_export_receipts: {
-    format: { kind: "enum", values: ["json", "csv"] },
+    format: { kind: "enum", values: ["json", "csv", "ndjson"] },
     resourceId: { ...RESOURCE_ID, required: false },
     network: { kind: "string", maxLength: 64 },
     since: { kind: "string", maxLength: 64 },
@@ -280,6 +310,9 @@ export const TOOL_ARGUMENT_SPECS: Record<string, ToolArgumentSpec> = {
     start: { kind: "integer", min: 0 },
     limit: { kind: "integer", min: 1, max: REGISTRY_LIST_MAX_LIMIT },
   },
+  mindvault_registry_count: {
+    creator: { kind: "string" },
+  },
   mindvault_tx_status: { txHash: { kind: "hash", required: true, bareHex: true } },
   // `confirm` is what resetGuard.isResetConfirmed reads. It was advertised in
   // ListTools and absent here, so every confirmed reset failed validation as an
@@ -289,14 +322,17 @@ export const TOOL_ARGUMENT_SPECS: Record<string, ToolArgumentSpec> = {
     all: { kind: "flag" },
     confirmMainnet: CONFIRM_MAINNET,
   },
-  mindvault_backup_state: { passphrase: PASSPHRASE },
+  mindvault_backup_state: { passphrase: PASSPHRASE, confirm: { kind: "flag" } },
+  mindvault_resource_provenance: { resourceId: RESOURCE_ID },
+  mindvault_resource_change_log: { resourceId: RESOURCE_ID },
   mindvault_restore_state: {
     blob: { kind: "string", required: true, maxLength: 1_048_576 },
     passphrase: PASSPHRASE,
   },
-  mindvault_metrics: {
-    reset: { kind: "flag" },
-    format: { kind: "enum", values: ["json", "otlp"] },
+  mindvault_metrics: { reset: { kind: "flag" } },
+  mindvault_debug_bundle: {
+    auditLogLines: { kind: "integer", min: 0, max: DEBUG_BUNDLE_MAX_AUDIT_LINES },
+    includeEnvironment: { kind: "flag" },
   },
   mindvault_set_tags: {
     resourceId: RESOURCE_ID,
@@ -327,8 +363,35 @@ export const TOOL_ARGUMENT_SPECS: Record<string, ToolArgumentSpec> = {
     confirmMainnet: CONFIRM_MAINNET,
     confirmPaid: CONFIRM_PAID,
   },
+  mindvault_freeze: {
+    resourceId: RESOURCE_ID,
+    confirm: {
+      kind: "string",
+      required: true,
+      pattern: /^freeze_metadata$/,
+      patternHint: 'the exact string "freeze_metadata"',
+    },
+    confirmMainnet: CONFIRM_MAINNET,
+    confirmPaid: CONFIRM_PAID,
+  },
+  mindvault_fee_config: {},
+  mindvault_royalty: {
+    resourceId: RESOURCE_ID,
+    royaltyRecipient: STELLAR_ADDRESS,
+    clear: { kind: "flag" },
+    confirmMainnet: CONFIRM_MAINNET,
+    confirmPaid: CONFIRM_PAID,
+  },
   mindvault_check_state_permissions: {},
   mindvault_registry_health: {},
+  mindvault_prewarm_catalog: {},
+  mindvault_client_config: {
+    client: {
+      kind: "enum",
+      values: ["claude-code", "claude-desktop", "codex", "cursor", "vscode", "windsurf"],
+    },
+  },
+  mindvault_mainnet_banner: {},
   mindvault_import_wallet: {
     secretKey: {
       kind: "string",
@@ -364,7 +427,8 @@ export type ValidationIssueCode =
   | "pattern_mismatch"
   | "not_in_enum"
   | "invalid_hash"
-  | "invalid_tag_array";
+  | "invalid_tag_array"
+  | "invalid_string_array";
 
 export interface ValidationIssue {
   field: string;
@@ -420,6 +484,13 @@ function expectation(spec: ArgumentSpec): string {
       return METADATA_HASH_FORMAT_HINT;
     case "tag_array":
       return "an array of 0–8 tag strings (each 1–32 chars, lowercase letters/digits/hyphens/underscores)";
+    case "string_array": {
+      const parts: string[] = ["an array of strings"];
+      if (spec.minLength !== undefined || spec.maxLength !== undefined) {
+        parts.push(`of ${spec.minLength ?? 0}–${spec.maxLength ?? "unbounded"} entries`);
+      }
+      return parts.join(" ");
+    }
     case "integer": {
       const parts: string[] = ["an integer"];
       if (spec.min !== undefined) parts.push(`≥ ${spec.min}`);
@@ -515,6 +586,86 @@ function validateTagArray(
     }
   }
 
+  return normalized;
+}
+
+/**
+ * Validate and normalize a string_array argument (batch resource ids, #608).
+ *
+ * Mirrors how the catalog treats ids in single-resource tools: each entry is
+ * trimmed, empty entries are dropped, and one malformed entry is reported as
+ * `invalid_string_array` with its 1-based position so an agent can fix it
+ * without guessing which of a long list was the problem. Entries keep their
+ * case and duplicates — unlike `tag_array` these are data selectors, not
+ * on-chain tags.
+ *
+ * Accepts a comma-separated string for the same reason `tag_array` does: MCP
+ * clients that render arrays as flat text are common enough that rejecting
+ * the shape outright would make the tool unusable from those clients.
+ */
+function validateStringArray(
+  field: string,
+  value: unknown,
+  spec: ArgumentSpec,
+  issues: ValidationIssue[],
+): string[] | undefined {
+  let raw: string[];
+
+  if (Array.isArray(value)) {
+    if (!value.every((t) => typeof t === "string")) {
+      issues.push({
+        field,
+        code: "invalid_string_array",
+        message: `${field} must be an array of strings; one or more entries are not strings.`,
+      });
+      return undefined;
+    }
+    raw = value as string[];
+  } else if (typeof value === "string") {
+    // Accept comma-separated strings for convenience (mirrors tag_array).
+    raw = value.split(",").filter((t) => t.trim().length > 0);
+  } else {
+    issues.push({
+      field,
+      code: "invalid_string_array",
+      message: `${field} must be an array of strings or a comma-separated string; received ${typeName(value)}.`,
+    });
+    return undefined;
+  }
+
+  // Normalize per entry: trim, drop empties. Case and duplicates are kept.
+  const normalized = raw.map((t) => t.trim()).filter((t) => t.length > 0);
+
+  const min = spec.minLength ?? 0;
+  const max = spec.maxLength;
+  if (normalized.length < min) {
+    issues.push({
+      field,
+      code: "invalid_string_array",
+      message: `${field} must contain at least ${min} entr${min === 1 ? "y" : "ies"}; received ${normalized.length} (after trimming).`,
+    });
+    return undefined;
+  }
+  if (max !== undefined && normalized.length > max) {
+    issues.push({
+      field,
+      code: "invalid_string_array",
+      message: `${field} must contain at most ${max} entries; received ${normalized.length}. Split the batch into smaller calls.`,
+    });
+    return undefined;
+  }
+
+  for (let i = 0; i < normalized.length; i++) {
+    const entry = normalized[i];
+    if (spec.pattern && !spec.pattern.test(entry)) {
+      issues.push({
+        field,
+        code: "invalid_string_array",
+        message: `${field}[${i + 1}] is malformed. Each entry must be ${spec.patternHint ?? "a valid entry"}.`,
+      });
+      return undefined;
+    }
+  }
   return normalized;
 }
 
@@ -779,6 +930,11 @@ export function validateToolArgs(tool: string, rawArgs: unknown): ValidatedArgs 
         if (tagArr !== undefined) out[field] = tagArr;
         break;
       }
+      case "string_array": {
+        const strArr = validateStringArray(field, value, fieldSpec, issues);
+        if (strArr !== undefined) out[field] = strArr;
+        break;
+      }
     }
   }
 
@@ -822,6 +978,15 @@ export function requiredTagArray(args: ValidatedArgs, field: string): string[] {
   const value = args[field];
   if (!Array.isArray(value)) {
     throw new Error(`Internal validation error: ${field} was not validated as a tag_array.`);
+  }
+  return value as string[];
+}
+
+/** Read a validated string array argument. Required string_array fields are guaranteed present. */
+export function requiredStringArray(args: ValidatedArgs, field: string): string[] {
+  const value = args[field];
+  if (!Array.isArray(value)) {
+    throw new Error(`Internal validation error: ${field} was not validated as a string_array.`);
   }
   return value as string[];
 }
