@@ -15,7 +15,7 @@ For structured JSON results (`structuredContent` + `outputSchema`) see
 For client installation and configuration see
 [mcp-client-configs.md](mcp-client-configs.md).
 
-**37 tools** as of last generation.
+**38 tools** as of last generation.
 
 ---
 
@@ -61,6 +61,7 @@ For client installation and configuration see
 | `mindvault_transfer_ownership` | Transfer ownership of a registered resource on the vault registry contract to a new creator wallet address (G… key). Only the current resource owner may call this.                                                                                                                                                                                                                                                             | yes        |
 | `mindvault_accept_transfer`    | Accept a pending ownership transfer of a registered resource. Only the address that was nominated as the new owner via mindvault_transfer_ownership can call this — the wallet must be the proposed new creator.                                                                                                                                                                                                                | yes        |
 | `mindvault_cancel_transfer`    | Cancel a pending ownership transfer of a registered resource. Only the current resource owner may call this. After an accepted transfer this will return an error — use this only while the transfer is still pending.                                                                                                                                                                                                          | yes        |
+| `mindvault_pending_transfer`   | Read the open ownership-transfer proposal for a registered resource. Returns the proposed new owner address if a pending transfer exists (created via mindvault_transfer_ownership), or a clear not-found message when no transfer is pending. Read-only — does not require a funded wallet.                                                                                                                                     | yes        |
 | `mindvault_set_listed`         | Manage catalog availability by changing the listed state (listed or delisted) of a resource on the vault registry contract. Only the resource creator/owner may call this.                                                                                                                                                                                                                                                      | yes        |
 
 ## Registry & Diagnostics
@@ -114,4 +115,4 @@ For client installation and configuration see
 
 ---
 
-_This file was generated from `mcp/src/tools.ts` — 37 tools._
+_This file was generated from `mcp/src/tools.ts` — 38 tools._

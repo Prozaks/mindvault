@@ -385,6 +385,21 @@ export const RECOVER_CACHE_OUTPUT_SCHEMA = {
   required: ["source", "action", "message"],
 } as const;
 
+export const PENDING_TRANSFER_OUTPUT_SCHEMA = {
+  type: "object",
+  properties: {
+    source: { type: "string" },
+    resourceId: { type: "string" },
+    found: { type: "boolean" },
+    proposedNewOwner: { type: ["string", "null"] },
+    message: { type: "string" },
+    contract: { type: "string" },
+    network: { type: "string" },
+    rpc: { type: "string" },
+  },
+  required: ["source", "resourceId", "found", "message", "contract"],
+} as const;
+
 /** Tools advertised in ListTools but not listed in TOOL_DEFINITIONS. */
 export const EXTRA_OUTPUT_SCHEMAS: Record<string, Record<string, unknown>> = {
   mindvault_publish_status: PUBLISH_STATUS_OUTPUT_SCHEMA as unknown as Record<string, unknown>,

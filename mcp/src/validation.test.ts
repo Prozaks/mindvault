@@ -60,6 +60,7 @@ const VALID_CALLS: Record<string, Record<string, unknown>> = {
   },
   mindvault_accept_transfer: { resourceId: "res-001" },
   mindvault_cancel_transfer: { resourceId: "res-001" },
+  mindvault_pending_transfer: { resourceId: "res-001" },
   mindvault_set_listed: { resourceId: "res-001", listed: true },
   mindvault_set_tags: { resourceId: "res-001", tags: ["dataset"] },
   mindvault_check_state_permissions: {},
