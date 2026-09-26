@@ -165,6 +165,8 @@ function sampleValue(spec: ArgumentSpec): unknown {
       return "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08";
     case "tag_array":
       return ["sample"];
+    case "string_array":
+      return ["contract-probe"];
     case "string":
       // `contract-probe` satisfies every string pattern in use (resource ids,
       // profile names, metadata pointers are all covered by the looser ones);
@@ -182,15 +184,15 @@ const SAMPLE_OVERRIDES: Record<string, Record<string, unknown>> = {
     newCreator: "GA6HCMBLTZS5VYYBCATRBRZ3BZJMAFUDKYYF6AH6MVCMGWMRDNSWJPIH",
   },
   mindvault_update_metadata: { metadata: "ipfs://QmProbe" },
+  mindvault_freeze: { confirm: "freeze_metadata" },
+  mindvault_royalty: {
+    royaltyRecipient: "GA6HCMBLTZS5VYYBCATRBRZ3BZJMAFUDKYYF6AH6MVCMGWMRDNSWJPIH",
+  },
   mindvault_import_wallet: {
     secretKey: "SAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
   },
-  mindvault_repair_sponsored_account: {
-    secretKey: "SAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-  },
-  mindvault_terms: {
-    operation: "get",
-    creator: "GA6HCMBLTZS5VYYBCATRBRZ3BZJMAFUDKYYF6AH6MVCMGWMRDNSWJPIH",
+  mindvault_publish_batch: {
+    items: [{ title: "Probe Resource", price: "1.00", externalUrl: "https://example.com/probe" }],
   },
 };
 
