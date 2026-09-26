@@ -8,6 +8,8 @@ measured it.
 
 This report is generated and enforced by the `storage_footprint_report` test in
 [`contract/contracts/vault-registry/src/test.rs`](../contract/contracts/vault-registry/src/test.rs).
+Contract CI runs the same report explicitly through `make footprint`, so
+storage growth fails unless the budget and this report are updated together.
 
 ## Running it
 
@@ -49,7 +51,9 @@ baseline for comparing one revision of the contract against another.
 | PaymentIndex -> receipt id | persistent | 104 |    72 |   176 |    240 |
 | PurchaseReceipt (anchor)   | persistent | 108 |   300 |   408 |    480 |
 | FlagReasonHash             | persistent |  68 |    72 |   140 |    200 |
+| AttestationHash            | persistent |  56 |    80 |   136 |    160 |
 | FeeConfig                  | instance   |  32 |   136 |   168 |    192 |
+| FeeDestination             | instance   |  36 |    76 |   112 |    192 |
 | Admin                      | instance   |  28 |    40 |    68 |     80 |
 | Verifier grant             | instance   |  68 |     8 |    76 |     96 |
 | Moderator grant            | instance   |  72 |     8 |    80 |     96 |
@@ -78,15 +82,10 @@ shared bounded view and is not included in the per-registration aggregate.
   measured at this fixture's cardinality (two resources for the creator, one
   resource per tag); read them as a per-member baseline. Each additional member
   adds roughly one id's worth of bytes.
-- **`TagCount`** stores one bounded `u32` counter per distinct tag, so it grows with
-  tag cardinality rather than resource count. **`TopTags`** stores the bounded
-  materialized view returned by `top_tags`; the fixture fills all 20 entries
-  with maximum-size tags.
-- **Instance entries** (`Count`, `TagCount`, `TopTags`, `CreatorCount`,
-  `FeeConfig`, `Admin`, and the three role grants) share the contract's instance
-  TTL, so they are bumped together and never archive independently. `TagCount`
-  grows with distinct tags and `TopTags` is capped at 20 entries; `CreatorCount`
-  grows with the number of distinct creators.
+- **Instance entries** (`Count`, `CreatorCount`, `FeeConfig`, `FeeDestination`, `Admin`, and the
+  three role grants) share the contract's instance TTL, so they are bumped
+  together and never archive independently. They are all small; `CreatorCount`
+  is the only one that grows with the number of distinct creators.
 - **`DataKey::DisputeFlag` is never written.** The dispute flag lives on the
   `Resource` struct (see `flag_resource`), so the key exists in the `DataKey`
   enum without a corresponding entry.

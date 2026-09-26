@@ -37,8 +37,8 @@ fn lifecycle_event_set_listed_delist_payload() {
 
     // Verify exact payload: (old_listed, new_listed)
     let payload: (bool, bool) = data.try_into_val(&env).unwrap();
-    assert_eq!(payload.0, true, "old_listed must be true (was Listed)");
-    assert_eq!(payload.1, false, "new_listed must be false (now Delisted)");
+    assert!(payload.0, "old_listed must be true (was Listed)");
+    assert!(!payload.1, "new_listed must be false (now Delisted)");
 }
 
 /// Verify that `set_listed(true)` emits `setlisted` event with exact payload
@@ -75,6 +75,6 @@ fn lifecycle_event_set_listed_relist_payload() {
 
     // Verify exact payload: (old_listed, new_listed)
     let payload: (bool, bool) = data.try_into_val(&env).unwrap();
-    assert_eq!(payload.0, false, "old_listed must be false (was Delisted)");
-    assert_eq!(payload.1, true, "new_listed must be true (now Listed)");
+    assert!(!payload.0, "old_listed must be false (was Delisted)");
+    assert!(payload.1, "new_listed must be true (now Listed)");
 }
