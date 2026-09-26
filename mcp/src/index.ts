@@ -105,6 +105,14 @@ import {
   type PublishProgressReporter,
   type PublishStatusFetch,
 } from "./publishStatus.js";
+import {
+  normalizeIntervalMs as normalizeResourceIntervalMs,
+  normalizeTimeoutMs as normalizeResourceTimeoutMs,
+  normalizeWaitFlag as normalizeResourceWaitFlag,
+  subscribeResource,
+  type ResourceProgressReporter,
+  type ResourceSubscriptionSnapshot,
+} from "./resourceSubscriptionTool.js";
 import { type ApiResponse } from "./apiResponse.js";
 import { safeErrorMessage, safeLog } from "./redaction.js";
 import { assertAutoPaymentWithinCeiling, assertTransactionFeeWithinCeiling } from "./paymentCeiling.js";
@@ -1643,6 +1651,40 @@ export async function publishStatus(
     attempts,
     timedOut,
   });
+  return JSON.stringify(snapshot, null, 2);
+}
+
+export async function subscribeResourceHandler(
+  args: {
+    resourceId?: string;
+    wait?: unknown;
+    timeoutMs?: unknown;
+    intervalMs?: unknown;
+  },
+  onProgress?: ResourceProgressReporter,
+): Promise<string> {
+  const resourceId = (args.resourceId ?? "").trim();
+  if (!resourceId) {
+    throw new Error(
+      "resourceId is required. Pass the id from mindvault_browse, mindvault_search, or mindvault_preview (e.g. 'cm7x8y9z').",
+    );
+  }
+
+  const wait = normalizeResourceWaitFlag(args.wait);
+  const timeoutMs = normalizeResourceTimeoutMs(args.timeoutMs);
+  const intervalMs = normalizeResourceIntervalMs(args.intervalMs);
+
+  const snapshot: ResourceSubscriptionSnapshot = await subscribeResource(
+    {
+      resourceId,
+      wait,
+      timeoutMs,
+      intervalMs,
+      sleep: sleepMs,
+    },
+    onProgress,
+  );
+
   return JSON.stringify(snapshot, null, 2);
 }
 
